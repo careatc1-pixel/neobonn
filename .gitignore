@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Environment variables (contains your Sheets URL & admin password —
+# never commit this to a public GitHub repo; set these in Vercel's
+# dashboard instead, see README.md)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

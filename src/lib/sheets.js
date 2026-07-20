@@ -42,6 +42,7 @@ export const SheetsAPI = {
   // ---- Orders sheet ----
   placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, ...}
   verifyPayment: (data) => callSheetsApi("verifyPayment", data), // {orderId, razorpay_payment_id, razorpay_signature}
+  getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // -> {ok, orders: [...]}
 
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),

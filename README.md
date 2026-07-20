@@ -62,6 +62,12 @@ Step 3 fixes.
    edits will now write straight into your Google Sheet — visible in
    real time, filterable, exportable to Excel, no server cost.
 
+> **Already had this connected before?** `Code.gs` now includes a
+> `getMyOrders` action (powers the order history on `/account`). Open
+> your Apps Script project, replace the old code with this updated
+> `Code.gs`, then **Deploy → Manage deployments → edit (pencil icon) →
+> New version → Deploy** so the live URL picks up the change.
+
 ## 4. Get a Razorpay account (for real payments)
 
 Sign up at razorpay.com (India-based, supports UPI/cards/netbanking).
@@ -74,16 +80,42 @@ Keys, and put them in the Script Properties above.
 > `handleVerifyPayment` in Code.gs) — so you still don't pay for a
 > traditional server, but the payment step stays secure.
 
-## 5. Admin Panel
+## 5. Logging in — Customer vs Admin
 
-Visit `/admin`, log in with the password from `VITE_ADMIN_PASSWORD` in
-your `.env` (default: `atharvluxe2026` — **change this before going
-live**). From the dashboard you can add new products (like the Vitamin C
-Serum once it's ready), edit specifications, prices, and mark items as
-"Coming Soon" or live.
+There's now a single **`/login`** page with two clearly separate
+modules at the top: **Customer** and **Admin**. Whichever one is
+selected shows its own form right below:
+
+- **Customer** — regular email/password login (or "Create an account"
+  to sign up). After logging in, customers land on `/account`, where
+  they now see their **order history** (pulled live from the `Orders`
+  tab in your Google Sheet, matched by email) alongside their profile.
+- **Admin** — enter the password from `VITE_ADMIN_PASSWORD` in your
+  `.env` (default: `atharvluxe2026` — **change this before going
+  live**). This takes you to `/admin/dashboard`, where you can add new
+  products (like the Vitamin C Serum once it's ready), edit
+  specifications, prices, and mark items as "Coming Soon" or live.
+
+Visiting `/admin` directly still works — it redirects into the same
+`/login` page with the Admin module pre-selected, so old bookmarks and
+links keep working.
 
 > For a production launch, swap this simple password gate for a proper
 > admin login row in the Sheet, checked the same way as customer login.
+
+### Order history not showing on Vercel?
+
+If `/admin` or a refreshed page ever 404s on Vercel, it's almost always
+one of these — the app itself doesn't need any change for these:
+- The deployed version predates this update — push the latest code and
+  redeploy.
+- `vercel.json` isn't present in the deployed build, or the Vercel
+  project's Framework Preset isn't "Vite" (it should auto-detect from
+  `vite.config.js`). Re-check **Project → Settings → General → Build &
+  Output Settings**.
+- `VITE_SHEETS_API_URL` isn't set in Vercel's Environment Variables —
+  without it, login/signup/orders silently run in **demo mode**
+  (browser-only), which is expected behaviour, not a bug.
 
 ## 6. Product photos
 
@@ -92,15 +124,57 @@ Product images currently point to placeholder paths like
 the `public/products/` folder using those exact filenames (or update the
 paths in `src/data/products.js` / via the Admin Panel).
 
-## 7. Deploying the site
+## 7. Deploying the site (Vercel — step by step)
 
-This is a static React app after `npm run build` — you can host it free
-on **Vercel**, **Netlify**, or **Cloudflare Pages** (drag-and-drop the
-`dist/` folder, or connect your GitHub repo). None of these require
-managing a server or IP address; only the Google Apps Script URL is your
-"backend," and that's already free and serverless.
+**Option A — GitHub + Vercel (recommended, auto-redeploys on future changes)**
 
-## 8. Company details already wired in
+1. Create a free account at [github.com](https://github.com) if you don't
+   have one, and a free account at [vercel.com](https://vercel.com) (you
+   can sign up directly with your GitHub account).
+2. On GitHub: click **New repository**, name it `neobonn`, keep it
+   **Private** (recommended, since `.env` details shouldn't be public even
+   though it's excluded), then follow GitHub's "push an existing folder"
+   instructions using the `neobonn` project folder from this zip.
+3. On Vercel: **Add New → Project**, select your `neobonn` GitHub repo,
+   click **Import**. Vercel auto-detects it's a Vite app — leave the
+   build settings as default (Build Command: `npm run build`, Output
+   Directory: `dist`).
+4. Before clicking Deploy, expand **Environment Variables** and add:
+   - `VITE_SHEETS_API_URL` = your Apps Script deployment URL
+   - `VITE_ADMIN_PASSWORD` = your admin panel password
+   (Do this here, not in `.env` — Vercel keeps these secret and out of
+   your repo.)
+5. Click **Deploy**. In ~1 minute you'll get a live URL like
+   `neobonn.vercel.app` — open it and test the whole site (Home, Shop,
+   Cart, Contact form, `/admin`).
+6. Any time you want to update the live site later, just edit files and
+   push to GitHub again — Vercel redeploys automatically.
+
+**Option B — Instant deploy without GitHub (quickest for a first look)**
+
+1. Install the Vercel CLI once: `npm install -g vercel`
+2. Inside the `neobonn` folder, run: `vercel`
+3. Follow the prompts (log in, confirm project settings). It will give
+   you a live `.vercel.app` URL immediately.
+4. Add your environment variables afterwards by running
+   `vercel env add VITE_SHEETS_API_URL` and
+   `vercel env add VITE_ADMIN_PASSWORD`, then redeploy with `vercel --prod`.
+
+Either way, the `vercel.json` file already included in this project
+tells Vercel to route all URLs (like `/products/multani-mitti-soap`)
+back through `index.html`, so page refreshes and direct links to any
+page work correctly — this is required for React Router apps.
+
+## 8. Connecting your own domain (after Vercel is live)
+
+Once the site is live on a `.vercel.app` URL, go to your Vercel project
+→ **Settings → Domains** → add your domain (e.g. `neobonn.com` once
+purchased). Vercel will show you 1–2 DNS records to add at your domain
+registrar (GoDaddy, Namecheap, etc.) — usually just an `A` record and a
+`CNAME`. It updates automatically once DNS propagates (a few minutes to
+a few hours).
+
+## 9. Company details already wired in
 
 - Brand: neobonn · Atharv Luxe Co.
 - Phone: +91 9654873069, +91 9310721874

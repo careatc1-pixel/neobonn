@@ -64,6 +64,8 @@ function doPost(e) {
         return jsonResponse(handlePlaceOrder(payload));
       case "verifyPayment":
         return jsonResponse(handleVerifyPayment(payload));
+      case "getMyOrders":
+        return jsonResponse(handleGetMyOrders(payload));
       case "listProducts":
         return jsonResponse(handleListProducts());
       case "upsertProduct":
@@ -180,6 +182,31 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   }
 
   return { ok: true };
+}
+
+function handleGetMyOrders({ email }) {
+  const sheet = getSheet("Orders");
+  const rows = sheet.getDataRange().getValues();
+  const [, ...data] = rows;
+  const orders = data
+    .filter((r) => r[0] && r[3] === email)
+    .map((r) => ({
+      orderId: r[0],
+      items: safeParse(r[1], []),
+      customerName: r[2],
+      email: r[3],
+      phone: r[4],
+      address: r[5],
+      city: r[6],
+      pincode: r[7],
+      amount: r[8],
+      status: r[9],
+      razorpayOrderId: r[10],
+      razorpayPaymentId: r[11],
+      createdAt: r[12],
+    }))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return { ok: true, orders };
 }
 
 // ---------------- Products (Admin Panel) ----------------
