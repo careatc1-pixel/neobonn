@@ -58,6 +58,12 @@ function doPost(e) {
         return jsonResponse(handleSignup(payload));
       case "login":
         return jsonResponse(handleLogin(payload));
+      case "sendOtp":
+        return jsonResponse(handleSendOtp(payload));
+      case "verifyOtpLogin":
+        return jsonResponse(handleVerifyOtpLogin(payload));
+      case "resetPasswordWithOtp":
+        return jsonResponse(handleResetPasswordWithOtp(payload));
       case "enquiry":
         return jsonResponse(handleEnquiry(payload));
       case "placeOrder":
@@ -100,6 +106,79 @@ function handleLogin({ email, password }) {
   return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
 }
 
+// ---------------- OTP: Email-based login & password reset ----------------
+// Uses Apps Script's built-in MailApp to send OTP emails — this is FREE
+// (uses your Google account's own daily email sending quota; ~100
+// emails/day on a plain Gmail account, much higher on Google Workspace).
+// No third-party SMS/email service or per-message cost is involved.
+// OTPs are stored in CacheService (auto-expires — nothing to clean up).
+
+const OTP_TTL_SECONDS = 300; // 5 minutes
+
+function generateOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+}
+
+function handleSendOtp({ email, purpose }) {
+  // purpose is "login" or "reset"
+  const usersSheet = getSheet("Users");
+  const rows = usersSheet.getDataRange().getValues();
+  const match = rows.find((r) => r[1] === email);
+
+  if (!match) {
+    return { ok: false, message: "No account found with this email." };
+  }
+
+  const otp = generateOtp();
+  CacheService.getScriptCache().put(`otp_${purpose}_${email}`, otp, OTP_TTL_SECONDS);
+
+  const subject =
+    purpose === "reset" ? "Reset your neobonn password" : "Your neobonn login code";
+  const body =
+    `Hi ${match[0]},\n\n` +
+    `Your one-time code is: ${otp}\n\n` +
+    `This code is valid for 5 minutes. If you didn't request this, you can safely ignore this email.\n\n` +
+    `— neobonn`;
+
+  MailApp.sendEmail(email, subject, body);
+  return { ok: true };
+}
+
+function handleVerifyOtpLogin({ email, otp }) {
+  const cache = CacheService.getScriptCache();
+  const stored = cache.get(`otp_login_${email}`);
+
+  if (!stored || stored !== otp) {
+    return { ok: false, message: "Invalid or expired code. Please request a new one." };
+  }
+  cache.remove(`otp_login_${email}`);
+
+  const sheet = getSheet("Users");
+  const rows = sheet.getDataRange().getValues();
+  const match = rows.find((r) => r[1] === email);
+  if (!match) return { ok: false, message: "No account found with this email." };
+
+  return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
+}
+
+function handleResetPasswordWithOtp({ email, otp, newPassword }) {
+  const cache = CacheService.getScriptCache();
+  const stored = cache.get(`otp_reset_${email}`);
+
+  if (!stored || stored !== otp) {
+    return { ok: false, message: "Invalid or expired code. Please request a new one." };
+  }
+  cache.remove(`otp_reset_${email}`);
+
+  const sheet = getSheet("Users");
+  const rows = sheet.getDataRange().getValues();
+  const rowIndex = rows.findIndex((r) => r[1] === email);
+  if (rowIndex === -1) return { ok: false, message: "No account found with this email." };
+
+  sheet.getRange(rowIndex + 1, 4).setValue(newPassword); // column D = Password
+  return { ok: true };
+}
+
 // ---------------- Enquiries ----------------
 
 function handleEnquiry({ name, email, phone, message }) {
@@ -119,6 +198,13 @@ function handlePlaceOrder({ items, customer, amount }) {
   const keyId = props.getProperty("RAZORPAY_KEY_ID");
   const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
 
+  if (!keyId || !keySecret) {
+    return {
+      ok: false,
+      message: "Razorpay is not configured yet. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Script Properties.",
+    };
+  }
+
   const rzpRes = UrlFetchApp.fetch("https://api.razorpay.com/v1/orders", {
     method: "post",
     contentType: "application/json",
@@ -134,6 +220,14 @@ function handlePlaceOrder({ items, customer, amount }) {
     muteHttpExceptions: true,
   });
   const rzpOrder = JSON.parse(rzpRes.getContentText());
+
+  if (!rzpOrder.id) {
+    // Razorpay rejected the request — usually bad/missing API keys, or
+    // Razorpay account not yet activated. Surface a clear error instead
+    // of silently saving a broken order.
+    const reason = (rzpOrder.error && rzpOrder.error.description) || "Unknown error";
+    return { ok: false, message: "Could not create payment order: " + reason };
+  }
 
   getSheet("Orders").appendRow([
     orderId,
@@ -189,7 +283,7 @@ function handleGetMyOrders({ email }) {
   const rows = sheet.getDataRange().getValues();
   const [, ...data] = rows;
   const orders = data
-    .filter((r) => r[0] && r[3] === email)
+    .filter((r) => r[0] && r[3] === email) // column D = Email
     .map((r) => ({
       orderId: r[0],
       items: safeParse(r[1], []),
@@ -201,11 +295,10 @@ function handleGetMyOrders({ email }) {
       pincode: r[7],
       amount: r[8],
       status: r[9],
-      razorpayOrderId: r[10],
-      razorpayPaymentId: r[11],
       createdAt: r[12],
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
   return { ok: true, orders };
 }
 

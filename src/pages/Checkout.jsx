@@ -53,7 +53,18 @@ export default function Checkout() {
         return;
       }
 
+      if (!orderRes.ok) {
+        setError(orderRes.message || "Could not start payment. Please try again.");
+        setPlacing(false);
+        return;
+      }
+
       const { orderId, razorpayOrderId, razorpayKeyId } = orderRes;
+      if (!razorpayOrderId || !razorpayKeyId) {
+        setError("Payment gateway is not configured yet. Please contact support.");
+        setPlacing(false);
+        return;
+      }
 
       const scriptOk = await loadRazorpayScript();
       if (!scriptOk) throw new Error("Could not load payment gateway. Check your connection.");
@@ -85,6 +96,13 @@ export default function Checkout() {
           }
         },
         modal: { ondismiss: () => setPlacing(false) },
+      });
+
+      rzp.on("payment.failed", (response) => {
+        setError(
+          response?.error?.description || "Payment failed. Please try again."
+        );
+        setPlacing(false);
       });
 
       rzp.open();

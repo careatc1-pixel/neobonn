@@ -41,10 +41,33 @@ export function AuthProvider({ children }) {
     return res;
   };
 
+  const requestOtp = async (email, purpose) => {
+    const res = await SheetsAPI.sendOtp(email, purpose);
+    if (res.demo) return { ok: true, demo: true };
+    return res;
+  };
+
+  const loginWithOtp = async (email, otp) => {
+    const res = await SheetsAPI.verifyOtpLogin(email, otp);
+    if (res.demo) {
+      const fake = { name: email.split("@")[0], email };
+      persist(fake);
+      return { ok: true, demo: true };
+    }
+    if (res.ok) persist(res.user);
+    return res;
+  };
+
+  const resetPassword = async (email, otp, newPassword) => {
+    const res = await SheetsAPI.resetPasswordWithOtp({ email, otp, newPassword });
+    if (res.demo) return { ok: true, demo: true };
+    return res;
+  };
+
   const logout = () => persist(null);
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, login, signup, logout, requestOtp, loginWithOtp, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

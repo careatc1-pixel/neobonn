@@ -62,12 +62,6 @@ Step 3 fixes.
    edits will now write straight into your Google Sheet — visible in
    real time, filterable, exportable to Excel, no server cost.
 
-> **Already had this connected before?** `Code.gs` now includes a
-> `getMyOrders` action (powers the order history on `/account`). Open
-> your Apps Script project, replace the old code with this updated
-> `Code.gs`, then **Deploy → Manage deployments → edit (pencil icon) →
-> New version → Deploy** so the live URL picks up the change.
-
 ## 4. Get a Razorpay account (for real payments)
 
 Sign up at razorpay.com (India-based, supports UPI/cards/netbanking).
@@ -80,42 +74,30 @@ Keys, and put them in the Script Properties above.
 > `handleVerifyPayment` in Code.gs) — so you still don't pay for a
 > traditional server, but the payment step stays secure.
 
-## 5. Logging in — Customer vs Admin
+## 4a. Email OTP — login & password reset (free, no SMS cost)
 
-There's now a single **`/login`** page with two clearly separate
-modules at the top: **Customer** and **Admin**. Whichever one is
-selected shows its own form right below:
+Customers can log in with a one-time email code instead of a password
+(toggle on the login page), and reset a forgotten password the same way.
+This uses Apps Script's built-in `MailApp.sendEmail` — **completely
+free**, since it uses your Google account's own email-sending quota
+(no SMS gateway, no per-message charge, nothing for you to pay for).
 
-- **Customer** — regular email/password login (or "Create an account"
-  to sign up). After logging in, customers land on `/account`, where
-  they now see their **order history** (pulled live from the `Orders`
-  tab in your Google Sheet, matched by email) alongside their profile.
-- **Admin** — enter the password from `VITE_ADMIN_PASSWORD` in your
-  `.env` (default: `atharvluxe2026` — **change this before going
-  live**). This takes you to `/admin/dashboard`, where you can add new
-  products (like the Vitamin C Serum once it's ready), edit
-  specifications, prices, and mark items as "Coming Soon" or live.
+One thing to know: a plain Gmail account can send **~100 emails/day**
+through Apps Script; a Google Workspace account gets a much higher
+quota (1,500/day). For a site with meaningful order volume, consider
+using a Workspace account for the Sheet, or switching to a transactional
+email API (e.g. Resend, Postmark) later if you outgrow the quota.
 
-Visiting `/admin` directly still works — it redirects into the same
-`/login` page with the Admin module pre-selected, so old bookmarks and
-links keep working.
+## 5. Admin Panel
+
+Visit `/admin`, log in with the password from `VITE_ADMIN_PASSWORD` in
+your `.env` (default: `atharvluxe2026` — **change this before going
+live**). From the dashboard you can add new products (like the Vitamin C
+Serum once it's ready), edit specifications, prices, and mark items as
+"Coming Soon" or live.
 
 > For a production launch, swap this simple password gate for a proper
 > admin login row in the Sheet, checked the same way as customer login.
-
-### Order history not showing on Vercel?
-
-If `/admin` or a refreshed page ever 404s on Vercel, it's almost always
-one of these — the app itself doesn't need any change for these:
-- The deployed version predates this update — push the latest code and
-  redeploy.
-- `vercel.json` isn't present in the deployed build, or the Vercel
-  project's Framework Preset isn't "Vite" (it should auto-detect from
-  `vite.config.js`). Re-check **Project → Settings → General → Build &
-  Output Settings**.
-- `VITE_SHEETS_API_URL` isn't set in Vercel's Environment Variables —
-  without it, login/signup/orders silently run in **demo mode**
-  (browser-only), which is expected behaviour, not a bug.
 
 ## 6. Product photos
 

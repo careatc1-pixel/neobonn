@@ -35,6 +35,9 @@ export const SheetsAPI = {
   // ---- Auth / Users sheet ----
   signup: (data) => callSheetsApi("signup", data), // {name, email, phone, password}
   login: (data) => callSheetsApi("login", data), // {email, password}
+  sendOtp: (email, purpose) => callSheetsApi("sendOtp", { email, purpose }), // purpose: "login" | "reset"
+  verifyOtpLogin: (email, otp) => callSheetsApi("verifyOtpLogin", { email, otp }),
+  resetPasswordWithOtp: (data) => callSheetsApi("resetPasswordWithOtp", data), // {email, otp, newPassword}
 
   // ---- Enquiries sheet ----
   submitEnquiry: (data) => callSheetsApi("enquiry", data), // {name, email, phone, message}
@@ -42,7 +45,7 @@ export const SheetsAPI = {
   // ---- Orders sheet ----
   placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, ...}
   verifyPayment: (data) => callSheetsApi("verifyPayment", data), // {orderId, razorpay_payment_id, razorpay_signature}
-  getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // -> {ok, orders: [...]}
+  getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // customer order history
 
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),
