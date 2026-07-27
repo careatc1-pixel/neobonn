@@ -4,6 +4,7 @@ import { Menu, X, ShoppingBag, User } from "lucide-react";
 import logo from "../assets/logo-icon.png";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
+import { COMPANY } from "../data/company";
 
 const LINKS = [
   { to: "/", label: "Home" },
@@ -26,8 +27,8 @@ export default function Navbar() {
             <span className="font-display text-xl tracking-wide text-[var(--color-forest-dark)] md:text-2xl">
               neobonn
             </span>
-            <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.25em] text-[var(--color-gold)] md:text-[10px]">
-              organic beauty
+            <span className="mt-0.5 whitespace-nowrap text-[8px] font-semibold uppercase tracking-[0.15em] text-[var(--color-gold)] md:text-[9px]">
+              {COMPANY.tagline}
             </span>
           </span>
         </Link>

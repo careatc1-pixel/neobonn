@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { COMPANY } from "../data/company";
 
 /**
  * Full-screen intro animation shown once per browser session.
@@ -57,8 +58,8 @@ export default function SplashScreen({ onFinish }) {
           <h1 className="font-display text-3xl tracking-wide text-[var(--color-forest-dark)]">
             neobonn
           </h1>
-          <p className="mt-1 text-xs uppercase tracking-[0.35em] text-[var(--color-gold)]">
-            organic beauty
+          <p className="mt-1 whitespace-nowrap text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold)]">
+            {COMPANY.tagline}
           </p>
         </div>
       </div>
