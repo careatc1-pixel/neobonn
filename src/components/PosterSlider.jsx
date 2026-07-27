@@ -91,18 +91,32 @@ export default function PosterSlider({
         tabIndex={0}
       >
         {/* Image */}
-        <div className="relative aspect-[16/10] w-full overflow-hidden sm:aspect-[16/8] lg:aspect-[16/6.2]">
+        <div className="relative aspect-[16/10] w-full overflow-hidden bg-[var(--color-forest-dark)] sm:aspect-[16/8] lg:aspect-[16/7]">
           {slides.map((s, i) => (
-            <img
+            <div
               key={s.id}
-              src={s.image}
-              alt={`${s.title} — ${s.tagline}`}
-              className="absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-700 ease-out"
+              className="absolute inset-0 transition-opacity duration-700 ease-out"
               style={{ opacity: i === index ? 1 : 0, zIndex: i === index ? 1 : 0 }}
               aria-hidden={i !== index}
-              loading={i === 0 ? "eager" : "lazy"}
-              draggable={false}
-            />
+            >
+              {/* Blurred backdrop fills the frame so nothing is ever cropped */}
+              <img
+                src={s.image}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full scale-110 object-cover object-center opacity-60 blur-2xl"
+                loading={i === 0 ? "eager" : "lazy"}
+                draggable={false}
+              />
+              {/* Full, uncropped poster */}
+              <img
+                src={s.image}
+                alt={`${s.title} — ${s.tagline}`}
+                className="relative h-full w-full object-contain object-center"
+                loading={i === 0 ? "eager" : "lazy"}
+                draggable={false}
+              />
+            </div>
           ))}
 
           {/* Arrows */}

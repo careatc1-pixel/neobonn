@@ -17,8 +17,8 @@ export const posterSlides = [
       { name: "Glutathione & \u03b1-Arbutin", benefit: "Powerful Brightening Complex" },
       { name: "Vitamin Complex (C, E, B3, Pro-V B5)", benefit: "Radiance & Repair" },
     ],
-    ctaLabel: "Shop Milk Serum",
-    ctaLink: "/products",
+    ctaLabel: "Know the Product",
+    ctaLink: "/products/instant-brightening-milk-serum",
   },
   {
     id: "radiance-serum",
@@ -33,8 +33,8 @@ export const posterSlides = [
       { name: "Niacinamide", benefit: "Skin Barrier & Tone" },
       { name: "Glycerin & Betaine", benefit: "Deep Hydration" },
     ],
-    ctaLabel: "Shop Face Serum",
-    ctaLink: "/products",
+    ctaLabel: "Know the Product",
+    ctaLink: "/products/radiance-serum",
   },
   {
     id: "peel-off-mask",
@@ -49,8 +49,8 @@ export const posterSlides = [
       { name: "Hydrolyzed Collagen", benefit: "Firming & Hydrating" },
       { name: "Titanium Dioxide & CI 19140", benefit: "Gentle Brightening" },
     ],
-    ctaLabel: "Shop Face Mask",
-    ctaLink: "/products",
+    ctaLabel: "Know the Product",
+    ctaLink: "/products/peel-off-collagen-algine-face-mask",
   },
   {
     id: "lip-balm",
@@ -65,8 +65,8 @@ export const posterSlides = [
       { name: "White Water Lily Extract", benefit: "Soothing & Balancing" },
       { name: "Niacinamide & Vitamin Complex", benefit: "C, E, B3, Pro-V B5" },
     ],
-    ctaLabel: "Shop Lip Balm",
-    ctaLink: "/products",
+    ctaLabel: "Know the Product",
+    ctaLink: "/products/neobonn-lip-balm",
   },
   {
     id: "brand-banner",
@@ -77,7 +77,7 @@ export const posterSlides = [
     description:
       "Say goodbye to stubborn breakouts without sacrificing your skin barrier. Our formulation purifies deep and restores hydration for a confident glow. Suitable for all skin types.",
     ingredients: [],
-    ctaLabel: "Start Your Radiant Journey",
+    ctaLabel: "Explore All Products",
     ctaLink: "/products",
   },
 ];
