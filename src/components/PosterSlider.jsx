@@ -96,7 +96,7 @@ export default function PosterSlider() {
             >
               <img
                 src={s.image}
-                alt={`${s.title} \u2014 ${s.tagline}`}
+                alt={`${s.title} — ${s.tagline}`}
                 className="h-full w-full object-cover object-center"
                 loading={i === 0 ? "eager" : "lazy"}
                 draggable={false}
@@ -129,7 +129,7 @@ export default function PosterSlider() {
                       className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm sm:text-xs"
                     >
                       <span className="font-semibold">{ing.name}</span>
-                      <span className="text-white/70"> \u2014 {ing.benefit}</span>
+                      <span className="text-white/70"> — {ing.benefit}</span>
                     </li>
                   ))}
                 </ul>
@@ -139,7 +139,7 @@ export default function PosterSlider() {
                 to={slide.ctaLink}
                 className="mt-5 inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-forest-dark)] transition-transform hover:scale-[1.03] sm:text-sm"
               >
-                {slide.ctaLabel} \u2192
+                {slide.ctaLabel} →
               </Link>
             </div>
           </div>
