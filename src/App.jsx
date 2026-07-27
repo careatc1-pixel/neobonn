@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import SplashScreen from "./components/SplashScreen";
+import PromoBanner from "./components/PromoBanner";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 
@@ -42,6 +43,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <PromoBanner />
       <Navbar />
       <main className="flex-1">
         <Routes>

@@ -1,7 +1,11 @@
 import { Link } from "react-router-dom";
 import { Leaf, Sparkles, ShieldCheck } from "lucide-react";
 import { products } from "../data/products";
+import { posterSlides } from "../data/posters";
 import ProductCard from "../components/ProductCard";
+import PosterSlider from "../components/PosterSlider";
+
+const heroSlides = posterSlides.filter((s) => s.id !== "brand-banner");
 
 export default function Home() {
   return (
@@ -52,6 +56,14 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Product range slider */}
+      <PosterSlider
+        slides={heroSlides}
+        eyebrow="What We're Selling"
+        heading="Meet the Neobonn Range"
+        showThumbnails={false}
+      />
 
       {/* Trust strip */}
       <section className="border-y border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] px-5 py-8 md:px-8">

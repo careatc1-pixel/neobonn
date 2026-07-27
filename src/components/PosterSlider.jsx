@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { Link } from "react-router-dom";
-import { posterSlides } from "../data/posters";
+import { posterSlides as allPosterSlides } from "../data/posters";
 
 const AUTOPLAY_MS = 5500;
 
-export default function PosterSlider() {
+export default function PosterSlider({
+  slides = allPosterSlides,
+  eyebrow = "The Ingredient Story",
+  heading = "Explore the Full Product Range",
+  showThumbnails = true,
+}) {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [hovering, setHovering] = useState(false);
   const timerRef = useRef(null);
   const touchStartX = useRef(null);
-  const slideCount = posterSlides.length;
+  const slideCount = slides.length;
 
   const goTo = useCallback(
     (i) => setIndex(((i % slideCount) + slideCount) % slideCount),
@@ -48,7 +53,7 @@ export default function PosterSlider() {
     touchStartX.current = null;
   };
 
-  const slide = posterSlides[index];
+  const slide = slides[index];
 
   return (
     <section
@@ -59,10 +64,10 @@ export default function PosterSlider() {
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
-            The Ingredient Story
+            {eyebrow}
           </p>
           <h2 className="mt-2 font-display text-3xl text-[var(--color-forest-dark)]">
-            Explore the Full Product Range
+            {heading}
           </h2>
         </div>
         <button
@@ -87,7 +92,7 @@ export default function PosterSlider() {
       >
         {/* Slides */}
         <div className="relative aspect-[16/10] w-full overflow-hidden sm:aspect-[16/8] lg:aspect-[16/6.2]">
-          {posterSlides.map((s, i) => (
+          {slides.map((s, i) => (
             <div
               key={s.id}
               className="absolute inset-0 transition-opacity duration-700 ease-out"
@@ -165,7 +170,7 @@ export default function PosterSlider() {
 
         {/* Dots */}
         <div className="absolute right-5 top-5 z-20 flex gap-1.5 sm:right-8 sm:top-8">
-          {posterSlides.map((s, i) => (
+          {slides.map((s, i) => (
             <button
               key={s.id}
               type="button"
@@ -196,31 +201,33 @@ export default function PosterSlider() {
       </div>
 
       {/* Thumbnail strip */}
-      <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-5">
-        {posterSlides.map((s, i) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => goTo(i)}
-            className={`group/thumb relative overflow-hidden rounded-xl border-2 transition-colors ${
-              i === index
-                ? "border-[var(--color-forest-dark)]"
-                : "border-transparent hover:border-[var(--color-forest)]/30"
-            }`}
-          >
-            <img
-              src={s.image}
-              alt={s.title}
-              className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover/thumb:scale-105"
-              loading="lazy"
-              draggable={false}
-            />
-            <span className="absolute inset-x-0 bottom-0 truncate bg-black/50 px-2 py-1 text-[10px] font-medium text-white">
-              {s.title}
-            </span>
-          </button>
-        ))}
-      </div>
+      {showThumbnails && (
+        <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-5">
+          {slides.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => goTo(i)}
+              className={`group/thumb relative overflow-hidden rounded-xl border-2 transition-colors ${
+                i === index
+                  ? "border-[var(--color-forest-dark)]"
+                  : "border-transparent hover:border-[var(--color-forest)]/30"
+              }`}
+            >
+              <img
+                src={s.image}
+                alt={s.title}
+                className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover/thumb:scale-105"
+                loading="lazy"
+                draggable={false}
+              />
+              <span className="absolute inset-x-0 bottom-0 truncate bg-black/50 px-2 py-1 text-[10px] font-medium text-white">
+                {s.title}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <style>{`
         @keyframes neobonn-progress {
