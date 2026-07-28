@@ -4,12 +4,20 @@ import { products } from "../data/products";
 import { posterSlides } from "../data/posters";
 import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
+import SaleHeroBanner from "../components/SaleHeroBanner";
+import CategoryStrip from "../components/CategoryStrip";
 
 const heroSlides = posterSlides.filter((s) => s.id !== "brand-banner");
 
 export default function Home() {
   return (
     <div>
+      {/* Sale hero banner (new) */}
+      <SaleHeroBanner />
+
+      {/* Category strip (new) */}
+      <CategoryStrip />
+
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pb-20 pt-16 md:px-8 md:pt-24">
         <div className="mx-auto grid max-w-7xl items-center gap-12 md:grid-cols-2">
