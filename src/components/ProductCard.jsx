@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 
 export default function ProductCard({ product }) {
   return (
@@ -22,6 +23,14 @@ export default function ProductCard({ product }) {
       <div className="p-4">
         <h3 className="font-display text-lg text-[var(--color-forest-dark)]">{product.name}</h3>
         <p className="mt-1 text-sm text-[var(--color-charcoal)]/60">{product.tagline}</p>
+
+        {product.dermatologicallyApproved && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-forest)]">
+            <ShieldCheck size={13} className="text-[var(--color-gold)]" />
+            Dermatologically Approved
+          </p>
+        )}
+
         <div className="mt-3 flex items-center justify-between">
           <span className="font-semibold text-[var(--color-charcoal)]">
             {product.comingSoon ? "Notify Me" : `₹${product.price}`}

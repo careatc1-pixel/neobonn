@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 import { getProductById } from "../data/products";
 import { useCart } from "../context/CartContext";
 import { SheetsAPI } from "../lib/sheets";
@@ -55,6 +56,14 @@ export default function ProductDetail() {
           <h1 className="mt-2 font-display text-4xl text-[var(--color-forest-dark)]">
             {product.name}
           </h1>
+
+          {product.dermatologicallyApproved && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-forest)]">
+              <ShieldCheck size={15} className="text-[var(--color-gold)]" />
+              Dermatologically Approved
+            </p>
+          )}
+
           <p className="mt-4 text-[var(--color-charcoal)]/70">{product.description}</p>
 
           {product.ingredients?.length > 0 && (
