@@ -13,7 +13,7 @@ export const products = [
     price: 599,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/instant-brightening-milk-serum.jpg",
+    image: "/products/instant-brightening-milk-serum.png",
     shortDescription:
       "A brightening serum that deeply purifies, targets stubborn pigmentation, and restores hydration for a confident glow.",
     description:
@@ -38,7 +38,7 @@ export const products = [
     price: 399,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/hydrating-cleanser.jpg",
+    image: "/products/hydrating-cleanser.png",
     shortDescription:
       "A soothing, balancing daily cleanser built on White Water Lily Extract and Niacinamide.",
     description:
@@ -63,7 +63,7 @@ export const products = [
     price: 649,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/radiance-serum.jpg",
+    image: "/products/radiance-serum.png",
     shortDescription:
       "Infuses collagen and deep hydration for a radiant, confident glow without harshness.",
     description:
@@ -88,7 +88,7 @@ export const products = [
     price: 549,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/peel-off-collagen-algine-face-mask.jpg",
+    image: "/products/peel-off-collagen-algine-face-mask.png",
     shortDescription:
       "A peel-off ritual mask that firms, purifies pores, and gently brightens.",
     description:
@@ -114,7 +114,7 @@ export const products = [
     price: 249,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/neobonn-lip-balm.jpg",
+    image: "/products/neobonn-lip-balm.png",
     shortDescription:
       "Bee wax and shea butter nourishment with a soft, natural tint.",
     description:
@@ -139,7 +139,7 @@ export const products = [
     price: null,
     comingSoon: true,
     dermatologicallyApproved: true,
-    image: "/products/vitamin-c-serum.jpg",
+    image: "/products/vitamin-c-serum.png",
     shortDescription:
       "A lightweight, cold-pressed vitamin C serum to even tone and add glow. Launching soon.",
     description:
@@ -160,7 +160,7 @@ export const products = [
     price: 249,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/multani-mitti.jpg",
+    image: "/products/multani-mitti.png",
     shortDescription:
       "Fuller's earth soap that draws out oil and impurities for a matte, clean finish.",
     description:
@@ -181,7 +181,7 @@ export const products = [
     price: 249,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/aloevera-lemongrass.jpg",
+    image: "/products/aloevera-lemongrass.png",
     shortDescription:
       "Cooling aloe vera paired with fresh lemongrass to soothe and refresh skin daily.",
     description:
@@ -202,7 +202,7 @@ export const products = [
     price: 279,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/charcoal-black-oud.jpg",
+    image: "/products/charcoal-black-oud.png",
     shortDescription:
       "Activated charcoal detox with a rich, smoky oud fragrance.",
     description:
@@ -223,7 +223,7 @@ export const products = [
     price: 249,
     comingSoon: false,
     dermatologicallyApproved: true,
-    image: "/products/papaya-way.jpg",
+    image: "/products/papaya-way.png",
     shortDescription:
       "Papaya-enzyme soap that gently exfoliates for brighter, even-toned skin.",
     description:
