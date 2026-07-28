@@ -4,27 +4,27 @@ import { LayoutGrid } from "lucide-react";
 const categories = [
   {
     label: "Face Serums",
-    image: "/products/instant-brightening-milk-serum.png",
+    image: "/products/instant-brightening-milk-serum.jpg",
     to: "/products/instant-brightening-milk-serum",
   },
   {
     label: "Face Masks",
-    image: "/products/peel-off-collagen-algine-face-mask.png",
+    image: "/products/peel-off-collagen-algine-face-mask.jpg",
     to: "/products/peel-off-collagen-algine-face-mask",
   },
   {
     label: "Lip Care",
-    image: "/products/neobonn-lip-balm.png",
+    image: "/products/neobonn-lip-balm.jpg",
     to: "/products/neobonn-lip-balm",
   },
   {
     label: "Body Soaps",
-    image: "/products/multani-mitti.png",
+    image: "/products/multani-mitti.jpg",
     to: "/products",
   },
   {
     label: "New Launches",
-    image: "/products/vitamin-c-serum.png",
+    image: "/products/vitamin-c-serum.jpg",
     to: "/products/vitamin-c-face-serum",
   },
 ];

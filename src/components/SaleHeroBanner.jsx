@@ -79,19 +79,19 @@ export default function SaleHeroBanner() {
           {/* Product collage + wax-seal discount badge */}
           <div className="relative mx-auto flex h-64 w-full max-w-sm items-center justify-center sm:h-80 md:h-96 md:max-w-none">
             <img
-              src="/products/multani-mitti.png"
+              src="/products/multani-mitti.jpg"
               alt="Multani Mitti Soap"
               className="absolute left-2 top-6 h-32 w-32 -rotate-6 rounded-2xl border-4 border-white object-cover shadow-2xl sm:h-40 sm:w-40 md:h-48 md:w-48"
               loading="lazy"
             />
             <img
-              src="/products/radiance-serum.png"
+              src="/products/radiance-serum.jpg"
               alt="Radiance Serum"
               className="absolute right-4 top-0 h-28 w-28 rotate-6 rounded-2xl border-4 border-white object-cover shadow-2xl sm:h-36 sm:w-36 md:h-44 md:w-44"
               loading="lazy"
             />
             <img
-              src="/products/neobonn-lip-balm.png"
+              src="/products/neobonn-lip-balm.jpg"
               alt="Neobonn Lip Balm"
               className="absolute bottom-2 left-1/2 h-24 w-24 -translate-x-1/2 rotate-3 rounded-2xl border-4 border-white object-cover shadow-2xl sm:h-32 sm:w-32 md:h-36 md:w-36"
               loading="lazy"
