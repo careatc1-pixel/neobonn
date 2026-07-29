@@ -52,8 +52,30 @@
 
 const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 
+// Bump this whenever you redeploy — lets you confirm from the browser
+// that the LIVE deployment is actually running this file, by visiting
+// your deployment URL (as a GET) or checking the "ping" action's
+// response. Prevents "did my redeploy actually take effect?" confusion.
+const CODE_VERSION = "2026-07-29-inventory-v2";
+
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
+}
+
+// Visit your deployment URL directly in a browser (a plain GET request)
+// to instantly confirm which code version is actually live, and to see
+// exactly how the Products sheet's headers are being matched right now
+// — invaluable when stock updates seem to "go missing."
+function doGet() {
+  let schema = null;
+  try {
+    const sheet = getSheet("Products");
+    const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    schema = { headerRow: header, resolvedColumns: getProductColumnMap(sheet) };
+  } catch (err) {
+    schema = { error: String(err) };
+  }
+  return jsonResponse({ ok: true, version: CODE_VERSION, productsSheetSchema: schema });
 }
 
 // ---- Header-based column lookup for the Products sheet ----
@@ -66,15 +88,27 @@ const PRODUCT_COLUMNS = [
   "ShortDescription", "Description", "Ingredients(JSON)", "Specifications(JSON)", "Stock",
 ];
 
+function normalizeHeaderText(s) {
+  return String(s || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function getProductColumnMap(sheet) {
   const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const wanted = {}; // normalized header text -> canonical column name
+  PRODUCT_COLUMNS.forEach((col) => {
+    wanted[normalizeHeaderText(col)] = col;
+  });
+
   const map = {};
   header.forEach((h, i) => {
-    const key = String(h || "").trim();
-    if (key) map[key] = i; // 0-based index within a row
+    const norm = normalizeHeaderText(h);
+    if (norm && wanted[norm] && !(wanted[norm] in map)) {
+      map[wanted[norm]] = i; // 0-based index within a row
+    }
   });
-  // Guard: if the header row is missing/blank/out of order, fall back to
-  // the documented default order rather than silently losing data.
+  // Guard: if a column's header is genuinely missing (not just
+  // differently-cased/spaced), fall back to the documented default
+  // position rather than silently losing data.
   PRODUCT_COLUMNS.forEach((col, i) => {
     if (!(col in map)) map[col] = i;
   });

@@ -217,6 +217,11 @@ export default function AdminDashboard() {
       });
     } else if (res.ok) {
       setList(res.products);
+    } else if (res.message === "Unknown action") {
+      alert(
+        "Import failed: your deployed Apps Script backend is running an older version of Code.gs that doesn't have the Import feature yet.\n\n" +
+        "Fix: open your Apps Script project → paste the latest Code.gs → Deploy → Manage deployments → click the pencil (Edit) on your existing deployment → Version: \"New version\" → Deploy. Then try importing again."
+      );
     } else {
       alert(res.message || "Import failed. Please try again.");
     }
