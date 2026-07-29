@@ -88,6 +88,8 @@ function doPost(e) {
         return jsonResponse(handleDeleteProduct(payload));
       case "updateStock":
         return jsonResponse(handleUpdateStock(payload));
+      case "bulkUpsertProducts":
+        return jsonResponse(handleBulkUpsertProducts(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -403,6 +405,45 @@ function handleUpsertProduct(p) {
     sheet.getRange(rowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
   }
   return handleListProducts();
+}
+
+// Bulk import: upserts an entire batch of products in one call — used by
+// the admin panel's "Import CSV" tool so someone can add/update their
+// whole catalog in one shot instead of one product at a time. Rows with
+// a matching Id are updated in place; unmatched Ids are appended.
+function handleBulkUpsertProducts({ products }) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const sheet = getSheet("Products");
+    const data = sheet.getDataRange().getValues();
+    const idRowIndex = {}; // productId -> 1-based sheet row number
+    for (let i = 1; i < data.length; i++) {
+      idRowIndex[data[i][0]] = i + 1;
+    }
+
+    const newRows = [];
+    (products || []).forEach((p) => {
+      const rowData = [
+        p.id, p.name, p.tagline, p.category, p.price, p.comingSoon, p.image,
+        p.shortDescription, p.description, JSON.stringify(p.ingredients || []),
+        JSON.stringify(p.specifications || {}), Number(p.stock) || 0,
+      ];
+      if (idRowIndex.hasOwnProperty(p.id)) {
+        sheet.getRange(idRowIndex[p.id], 1, 1, rowData.length).setValues([rowData]);
+      } else {
+        newRows.push(rowData);
+      }
+    });
+
+    if (newRows.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    }
+
+    return handleListProducts();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handleDeleteProduct({ id }) {
