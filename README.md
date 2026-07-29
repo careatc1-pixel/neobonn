@@ -22,6 +22,9 @@ required).
   Script (no separate backend server needed) → order + bill saved to Sheet
 - ✅ Admin Panel (`/admin`) to add/edit/delete products, specifications
   included
+- ✅ Inventory management: track stock per product, auto "Out of Stock"
+  on the storefront when it hits 0, and stock is auto-deducted from the
+  Google Sheet the moment a payment is verified
 - ✅ Runs entirely without a backend too ("demo mode") so you can preview
   the whole site before wiring up Sheets
 
@@ -98,6 +101,41 @@ Serum once it's ready), edit specifications, prices, and mark items as
 
 > For a production launch, swap this simple password gate for a proper
 > admin login row in the Sheet, checked the same way as customer login.
+
+## 6. Inventory management (stock / out-of-stock)
+
+Every product now has a **Stock** column — the number of units you have
+on hand. The storefront reads this live, so:
+
+- When a product's stock reaches **0**, it automatically shows an
+  **"Out of Stock"** badge on the shop grid and product page, the "Add
+  to Bag" button is replaced with a "Notify Me" form, and the quantity
+  people can add to their bag is capped at what's actually available.
+- The moment a customer's payment is **verified** (not just placed —
+  actually paid), that quantity is automatically subtracted from the
+  Products sheet. No manual step needed.
+- The backend also double-checks stock right before creating the
+  Razorpay order, so two people can't both buy the last unit.
+
+**Managing stock, day to day:** Go to `/admin/dashboard`. Each product
+row has a **Stock** column with `−` / `+` buttons and a number box you
+can type into directly — changes save instantly to your Google Sheet.
+You can also set stock from the full "Edit" form.
+
+**If you already have a live Google Sheet from before this update:**
+add a new header `Stock` as the 12th column (column L) on the
+`Products` tab, and re-copy the latest `google-apps-script/Code.gs`
+into your Apps Script project (Extensions -> Apps Script), then
+**Deploy -> Manage deployments -> Edit -> New version -> Deploy** so
+the update goes live. Existing product rows will read as 0 stock until
+you fill in real quantities from the admin panel.
+
+**Column order no longer matters.** The script reads Products columns
+by their header text (row 1), not by position — so accidentally
+reordering columns, or a CSV import shifting things, can't silently
+corrupt or drop a product anymore. Just keep the 12 header names
+exactly as spelled in the schema above somewhere in row 1; they can be
+in any order and you can add your own extra columns alongside them.
 
 ## 6. Product photos
 

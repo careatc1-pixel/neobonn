@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
-import { getProductById } from "../data/products";
+import { useProducts } from "../context/ProductsContext";
 import { useCart } from "../context/CartContext";
 import { SheetsAPI } from "../lib/sheets";
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const { getProductById, isOutOfStock, loading } = useProducts();
   const product = getProductById(id);
   const { addItem } = useCart();
   const [qty, setQty] = useState(1);
@@ -14,7 +15,15 @@ export default function ProductDetail() {
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notified, setNotified] = useState(false);
 
-  if (!product) return <Navigate to="/products" replace />;
+  if (!product) {
+    if (loading) {
+      return <div className="mx-auto max-w-6xl px-5 py-24 text-center text-[var(--color-charcoal)]/50">Loading…</div>;
+    }
+    return <Navigate to="/products" replace />;
+  }
+
+  const outOfStock = isOutOfStock(product);
+  const maxQty = Math.max(1, Number(product.stock ?? 1));
 
   const handleAdd = () => {
     addItem(product, qty);
@@ -28,7 +37,7 @@ export default function ProductDetail() {
       name: "Waitlist",
       email: notifyEmail,
       phone: "",
-      message: `Notify me when ${product.name} launches`,
+      message: `Notify me when ${product.name} is back in stock`,
     });
     setNotified(true);
   };
@@ -45,14 +54,21 @@ export default function ProductDetail() {
             src={product.image}
             alt={product.name}
             onError={(e) => (e.currentTarget.style.opacity = 0)}
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover ${outOfStock ? "grayscale" : ""}`}
           />
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
-            {product.category}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
+              {product.category}
+            </p>
+            {outOfStock && (
+              <span className="rounded-full bg-red-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-red-700">
+                Out of Stock
+              </span>
+            )}
+          </div>
           <h1 className="mt-2 font-display text-4xl text-[var(--color-forest-dark)]">
             {product.name}
           </h1>
@@ -89,10 +105,10 @@ export default function ProductDetail() {
           )}
 
           <div className="mt-8">
-            {product.comingSoon ? (
+            {product.comingSoon || outOfStock ? (
               notified ? (
                 <p className="text-sm font-medium text-[var(--color-forest-dark)]">
-                  Thanks — we'll email you at launch! 🌿
+                  Thanks — we'll email you {product.comingSoon ? "at launch" : "when it's back"}! 🌿
                 </p>
               ) : (
                 <form onSubmit={handleNotify} className="flex max-w-sm gap-2">
@@ -114,19 +130,26 @@ export default function ProductDetail() {
                 <div className="flex items-center rounded-full border border-[var(--color-forest)]/20">
                   <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="px-4 py-2 text-lg">−</button>
                   <span className="w-8 text-center">{qty}</span>
-                  <button onClick={() => setQty((q) => q + 1)} className="px-4 py-2 text-lg">+</button>
+                  <button onClick={() => setQty((q) => Math.min(maxQty, q + 1))} className="px-4 py-2 text-lg">+</button>
                 </div>
                 <span className="font-display text-2xl text-[var(--color-forest-dark)]">₹{product.price}</span>
               </div>
             )}
 
-            {!product.comingSoon && (
-              <button
-                onClick={handleAdd}
-                className="mt-6 w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white transition-transform hover:scale-[1.01] sm:w-auto sm:px-10"
-              >
-                {added ? "Added to Bag ✓" : "Add to Bag"}
-              </button>
+            {!product.comingSoon && !outOfStock && (
+              <>
+                <button
+                  onClick={handleAdd}
+                  className="mt-6 w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white transition-transform hover:scale-[1.01] sm:w-auto sm:px-10"
+                >
+                  {added ? "Added to Bag ✓" : "Add to Bag"}
+                </button>
+                {maxQty <= 5 && (
+                  <p className="mt-2 text-xs text-[var(--color-charcoal)]/50">
+                    Only {maxQty} left in stock — order soon.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>

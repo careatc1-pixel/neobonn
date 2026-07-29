@@ -51,4 +51,6 @@ export const SheetsAPI = {
   listProducts: () => callSheetsApi("listProducts"),
   upsertProduct: (product) => callSheetsApi("upsertProduct", product),
   deleteProduct: (id) => callSheetsApi("deleteProduct", { id }),
+  updateStock: (id, stock) => callSheetsApi("updateStock", { id, stock }), // inventory manager
+  bulkUpsertProducts: (products) => callSheetsApi("bulkUpsertProducts", { products }), // CSV import
 };
