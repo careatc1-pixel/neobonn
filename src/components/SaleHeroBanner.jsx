@@ -11,20 +11,57 @@ export default function SaleHeroBanner() {
         <div className="pointer-events-none absolute -left-16 -top-16 h-72 w-72 rounded-full bg-[var(--color-gold)]/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-[var(--color-forest)]/40 blur-3xl" />
 
-        {/* Botanical line-art corner flourish */}
+        {/* Botanical branch flourish — a quiet, premium signature motif
+            (soft gilded leaves) rather than a busy line-scribble */}
         <svg
-          className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.14]"
+          className="pointer-events-none absolute inset-0 h-full w-full"
           viewBox="0 0 1000 500"
           preserveAspectRatio="xMidYMid slice"
           aria-hidden="true"
         >
-          <g stroke="var(--color-cream)" fill="none" strokeWidth="1.2">
-            <path d="M960,40 C930,90 940,140 900,190 C930,150 950,110 960,40 Z" />
-            <path d="M905,60 C880,100 885,140 855,175" />
-            <path d="M935,75 C910,105 915,130 890,155" />
-            <path d="M40,470 C80,420 70,370 110,320 C80,360 55,405 40,470 Z" />
-            <path d="M95,450 C120,410 115,375 145,340" />
-            <path d="M65,435 C90,400 88,370 115,345" />
+          <defs>
+            <linearGradient id="neobonnLeafGold" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="var(--color-gold-light)" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0.22" />
+            </linearGradient>
+            <linearGradient id="neobonnLeafCream" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="var(--color-cream)" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="var(--color-cream)" stopOpacity="0.06" />
+            </linearGradient>
+            <path id="neobonnLeaf" d="M0,0 C9,-16 27,-16 36,0 C27,16 9,16 0,0 Z" />
+            <g id="neobonnLeafVein">
+              <use href="#neobonnLeaf" />
+              <path d="M2,0 L34,0" stroke="var(--color-forest-dark)" strokeOpacity="0.25" strokeWidth="1" fill="none" />
+            </g>
+          </defs>
+
+          {/* top-right sprig */}
+          <g>
+            <path
+              d="M 1000,4 C 945,32 902,82 862,146"
+              stroke="var(--color-cream)"
+              strokeOpacity="0.22"
+              fill="none"
+              strokeWidth="1.5"
+            />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafGold)" transform="translate(953,20) rotate(112)" />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafCream)" transform="translate(921,52) rotate(98) scale(0.85)" />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafGold)" transform="translate(892,88) rotate(120) scale(0.7)" />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafCream)" transform="translate(869,128) rotate(104) scale(0.55)" />
+          </g>
+
+          {/* bottom-left sprig, smaller — echoes the top-right one */}
+          <g>
+            <path
+              d="M 0,500 C 52,472 88,432 122,384"
+              stroke="var(--color-cream)"
+              strokeOpacity="0.18"
+              fill="none"
+              strokeWidth="1.3"
+            />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafCream)" transform="translate(38,480) rotate(-66) scale(0.6)" />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafGold)" transform="translate(68,452) rotate(-82) scale(0.48)" />
+            <use href="#neobonnLeafVein" fill="url(#neobonnLeafCream)" transform="translate(98,417) rotate(-70) scale(0.38)" />
           </g>
         </svg>
 
