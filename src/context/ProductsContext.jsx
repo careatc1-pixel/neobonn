@@ -5,21 +5,39 @@ import { SheetsAPI } from "../lib/sheets";
 const ProductsContext = createContext(null);
 
 export function ProductsProvider({ children }) {
-  const [products, setProducts] = useState(defaultProducts);
+  // Start empty (not the static catalog) — that catalog was flashing on
+  // screen for a moment before being replaced by whatever the live Sheet
+  // returned, which looked like "products disappearing." Pages should
+  // show a loading state instead until we know the real data.
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await SheetsAPI.listProducts();
       if (res.demo) {
         setDemoMode(true);
-        setProducts(defaultProducts); // no backend wired up — use local catalog
+        setProducts(defaultProducts); // no backend configured — local catalog IS the real data here
       } else if (res.ok) {
         setDemoMode(false);
         setProducts(res.products);
+      } else {
+        // Backend reachable but returned an error — fall back to the
+        // local catalog so the shop isn't blank, but flag it.
+        console.warn("[products] listProducts returned an error, using local catalog as fallback", res);
+        setLoadError(res.message || "Could not load live product data.");
+        setProducts(defaultProducts);
       }
+    } catch (err) {
+      // Network/CORS/deployment-URL problem — same fallback, so a
+      // backend hiccup never leaves the shop empty.
+      console.warn("[products] Could not reach Sheets backend, using local catalog as fallback", err);
+      setLoadError("Could not reach the product database. Showing the built-in catalog instead.");
+      setProducts(defaultProducts);
     } finally {
       setLoading(false);
     }
@@ -38,7 +56,7 @@ export function ProductsProvider({ children }) {
 
   return (
     <ProductsContext.Provider
-      value={{ products, loading, demoMode, refresh, getProductById, isOutOfStock }}
+      value={{ products, loading, demoMode, loadError, refresh, getProductById, isOutOfStock }}
     >
       {children}
     </ProductsContext.Provider>
