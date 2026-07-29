@@ -19,10 +19,16 @@
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
  *
- *    NOTE ON INVENTORY: The "Stock" column (column L) holds how many
- *    units of that product are currently available. The admin panel's
- *    "Manage Inventory" controls read/write this column directly. When
- *    a payment is verified (handleVerifyPayment), stock is automatically
+ *    IMPORTANT: these Products headers must be spelled EXACTLY as above
+ *    (case-sensitive) in row 1 of the Products tab — the script looks
+ *    up each column BY NAME, not by position, so you can safely
+ *    reorder or add extra columns of your own without breaking
+ *    anything. Just don't rename/remove the headers above.
+ *
+ *    NOTE ON INVENTORY: The "Stock" column holds how many units of
+ *    that product are currently available. The admin panel's "Manage
+ *    Inventory" controls read/write this column directly. When a
+ *    payment is verified (handleVerifyPayment), stock is automatically
  *    decremented by the quantity purchased. Once a product's Stock
  *    reaches 0, the storefront automatically shows it as "Out of Stock"
  *    and disables Add to Bag for it — no manual step needed.
@@ -48,6 +54,78 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
+}
+
+// ---- Header-based column lookup for the Products sheet ----
+// Reads columns by their header NAME instead of a hardcoded position, so
+// the sheet stays correct even if someone inserts/reorders/renames-back
+// a column by hand, or a CSV import ever shifts things. This is what
+// prevents "wrong column read as Stock" / "row silently dropped" bugs.
+const PRODUCT_COLUMNS = [
+  "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
+  "ShortDescription", "Description", "Ingredients(JSON)", "Specifications(JSON)", "Stock",
+];
+
+function getProductColumnMap(sheet) {
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const map = {};
+  header.forEach((h, i) => {
+    const key = String(h || "").trim();
+    if (key) map[key] = i; // 0-based index within a row
+  });
+  // Guard: if the header row is missing/blank/out of order, fall back to
+  // the documented default order rather than silently losing data.
+  PRODUCT_COLUMNS.forEach((col, i) => {
+    if (!(col in map)) map[col] = i;
+  });
+  return map;
+}
+
+function rowToProductObject(row, colMap) {
+  const val = (col) => row[colMap[col]];
+  const id = String(val("Id") || "").trim() || slugifyForSheet(val("Name"));
+  return {
+    id,
+    name: val("Name"),
+    tagline: val("Tagline"),
+    category: val("Category"),
+    price: val("Price") || null,
+    comingSoon: val("ComingSoon") === true || val("ComingSoon") === "TRUE",
+    image: val("Image"),
+    shortDescription: val("ShortDescription"),
+    description: val("Description"),
+    ingredients: safeParse(val("Ingredients(JSON)"), []),
+    specifications: safeParse(val("Specifications(JSON)"), {}),
+    stock: Number(val("Stock")) || 0,
+  };
+}
+
+function productToRowArray(p, colMap) {
+  const row = new Array(PRODUCT_COLUMNS.length).fill("");
+  const set = (col, value) => {
+    if (col in colMap) row[colMap[col]] = value;
+  };
+  set("Id", p.id);
+  set("Name", p.name);
+  set("Tagline", p.tagline);
+  set("Category", p.category);
+  set("Price", p.price);
+  set("ComingSoon", !!p.comingSoon);
+  set("Image", p.image);
+  set("ShortDescription", p.shortDescription);
+  set("Description", p.description);
+  set("Ingredients(JSON)", JSON.stringify(p.ingredients || []));
+  set("Specifications(JSON)", JSON.stringify(p.specifications || {}));
+  set("Stock", Number(p.stock) || 0);
+  return row;
+}
+
+function slugifyForSheet(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || ("product-" + new Date().getTime());
 }
 
 function jsonResponse(obj) {
@@ -276,16 +354,21 @@ function handlePlaceOrder({ items, customer, amount }) {
 // ordered. Returns a human-readable error message string if something
 // is unavailable, or null if the whole cart can be fulfilled.
 function checkStockAvailability(items) {
-  const rows = getSheet("Products").getDataRange().getValues();
+  const sheet = getSheet("Products");
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const nameCol = colMap["Name"];
+  const stockCol = colMap["Stock"];
   for (const item of items) {
-    const row = rows.find((r) => r[0] === item.id);
+    const row = rows.find((r) => String(r[idCol]) === String(item.id));
     if (!row) continue; // unknown product id — let it through, nothing to check
-    const available = Number(row[11]) || 0;
+    const available = Number(row[stockCol]) || 0;
     if (available <= 0) {
-      return `Sorry, "${row[1]}" just sold out. Please remove it from your bag.`;
+      return `Sorry, "${row[nameCol]}" just sold out. Please remove it from your bag.`;
     }
     if (available < Number(item.qty || 0)) {
-      return `Sorry, only ${available} left of "${row[1]}". Please lower the quantity in your bag.`;
+      return `Sorry, only ${available} left of "${row[nameCol]}". Please lower the quantity in your bag.`;
     }
   }
   return null;
@@ -296,12 +379,15 @@ function checkStockAvailability(items) {
 function deductStock(items) {
   const sheet = getSheet("Products");
   const rows = sheet.getDataRange().getValues();
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const stockCol = colMap["Stock"];
   items.forEach((item) => {
-    const rowIndex = rows.findIndex((r) => r[0] === item.id);
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(item.id));
     if (rowIndex === -1) return;
-    const current = Number(rows[rowIndex][11]) || 0;
+    const current = Number(rows[rowIndex][stockCol]) || 0;
     const next = Math.max(0, current - Number(item.qty || 0));
-    sheet.getRange(rowIndex + 1, 12).setValue(next); // column L = Stock
+    sheet.getRange(rowIndex + 1, stockCol + 1).setValue(next);
   });
 }
 
@@ -377,28 +463,21 @@ function handleGetMyOrders({ email }) {
 function handleListProducts() {
   const sheet = getSheet("Products");
   const rows = sheet.getDataRange().getValues();
+  const colMap = getProductColumnMap(sheet);
   const [, ...data] = rows;
   const products = data
-    .filter((r) => r[0])
-    .map((r) => ({
-      id: r[0], name: r[1], tagline: r[2], category: r[3], price: r[4] || null,
-      comingSoon: r[5] === true || r[5] === "TRUE", image: r[6],
-      shortDescription: r[7], description: r[8],
-      ingredients: safeParse(r[9], []), specifications: safeParse(r[10], {}),
-      stock: Number(r[11]) || 0,
-    }));
+    .filter((r) => r.some((cell) => cell !== "")) // skip fully blank rows only
+    .map((r) => rowToProductObject(r, colMap));
   return { ok: true, products };
 }
 
 function handleUpsertProduct(p) {
   const sheet = getSheet("Products");
   const rows = sheet.getDataRange().getValues();
-  const rowIndex = rows.findIndex((r) => r[0] === p.id);
-  const rowData = [
-    p.id, p.name, p.tagline, p.category, p.price, p.comingSoon, p.image,
-    p.shortDescription, p.description, JSON.stringify(p.ingredients || []),
-    JSON.stringify(p.specifications || {}), Number(p.stock) || 0,
-  ];
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(p.id));
+  const rowData = productToRowArray(p, colMap);
   if (rowIndex === -1) {
     sheet.appendRow(rowData);
   } else {
@@ -417,20 +496,18 @@ function handleBulkUpsertProducts({ products }) {
   try {
     const sheet = getSheet("Products");
     const data = sheet.getDataRange().getValues();
+    const colMap = getProductColumnMap(sheet);
+    const idCol = colMap["Id"];
     const idRowIndex = {}; // productId -> 1-based sheet row number
     for (let i = 1; i < data.length; i++) {
-      idRowIndex[data[i][0]] = i + 1;
+      if (data[i][idCol]) idRowIndex[String(data[i][idCol])] = i + 1;
     }
 
     const newRows = [];
     (products || []).forEach((p) => {
-      const rowData = [
-        p.id, p.name, p.tagline, p.category, p.price, p.comingSoon, p.image,
-        p.shortDescription, p.description, JSON.stringify(p.ingredients || []),
-        JSON.stringify(p.specifications || {}), Number(p.stock) || 0,
-      ];
-      if (idRowIndex.hasOwnProperty(p.id)) {
-        sheet.getRange(idRowIndex[p.id], 1, 1, rowData.length).setValues([rowData]);
+      const rowData = productToRowArray(p, colMap);
+      if (idRowIndex.hasOwnProperty(String(p.id))) {
+        sheet.getRange(idRowIndex[String(p.id)], 1, 1, rowData.length).setValues([rowData]);
       } else {
         newRows.push(rowData);
       }
@@ -449,7 +526,9 @@ function handleBulkUpsertProducts({ products }) {
 function handleDeleteProduct({ id }) {
   const sheet = getSheet("Products");
   const rows = sheet.getDataRange().getValues();
-  const rowIndex = rows.findIndex((r) => r[0] === id);
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(id));
   if (rowIndex > -1) sheet.deleteRow(rowIndex + 1);
   return handleListProducts();
 }
@@ -463,9 +542,12 @@ function handleUpdateStock({ id, stock }) {
   try {
     const sheet = getSheet("Products");
     const rows = sheet.getDataRange().getValues();
-    const rowIndex = rows.findIndex((r) => r[0] === id);
+    const colMap = getProductColumnMap(sheet);
+    const idCol = colMap["Id"];
+    const stockCol = colMap["Stock"];
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(id));
     if (rowIndex === -1) return { ok: false, message: "Product not found." };
-    sheet.getRange(rowIndex + 1, 12).setValue(Math.max(0, Number(stock) || 0)); // column L = Stock
+    sheet.getRange(rowIndex + 1, stockCol + 1).setValue(Math.max(0, Number(stock) || 0));
     return handleListProducts();
   } finally {
     lock.releaseLock();

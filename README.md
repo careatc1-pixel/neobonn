@@ -130,6 +130,13 @@ into your Apps Script project (Extensions -> Apps Script), then
 the update goes live. Existing product rows will read as 0 stock until
 you fill in real quantities from the admin panel.
 
+**Column order no longer matters.** The script reads Products columns
+by their header text (row 1), not by position — so accidentally
+reordering columns, or a CSV import shifting things, can't silently
+corrupt or drop a product anymore. Just keep the 12 header names
+exactly as spelled in the schema above somewhere in row 1; they can be
+in any order and you can add your own extra columns alongside them.
+
 ## 6. Product photos
 
 Product images currently point to placeholder paths like
