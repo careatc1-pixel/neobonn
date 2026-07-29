@@ -6,7 +6,7 @@ import { SheetsAPI } from "../../lib/sheets";
 const emptyProduct = {
   id: "", name: "", tagline: "", category: "Body", price: "",
   comingSoon: false, image: "", shortDescription: "", description: "",
-  ingredients: "", specifications: "",
+  ingredients: "", specifications: "", stock: "",
 };
 
 export default function AdminDashboard() {
@@ -15,6 +15,8 @@ export default function AdminDashboard() {
   const [editing, setEditing] = useState(null); // product being edited, or null
   const [saving, setSaving] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [stockDrafts, setStockDrafts] = useState({}); // { [id]: "12" } while typing
+  const [stockSavingId, setStockSavingId] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -36,6 +38,7 @@ export default function AdminDashboard() {
   const startEdit = (p) =>
     setEditing({
       ...p,
+      stock: p.stock ?? "",
       ingredients: (p.ingredients || []).join(", "),
       specifications: JSON.stringify(p.specifications || {}, null, 2),
     });
@@ -46,6 +49,7 @@ export default function AdminDashboard() {
     const payload = {
       ...editing,
       price: editing.price ? Number(editing.price) : null,
+      stock: editing.stock === "" || editing.stock == null ? 0 : Math.max(0, Number(editing.stock)),
       ingredients: editing.ingredients
         ? editing.ingredients.split(",").map((s) => s.trim())
         : [],
@@ -85,6 +89,26 @@ export default function AdminDashboard() {
     }
   };
 
+  // ---- Manage Inventory: fast, single-field stock updates ----
+  const saveStock = async (id, nextStock) => {
+    const stock = Math.max(0, Number(nextStock) || 0);
+    setStockSavingId(id);
+    const res = await SheetsAPI.updateStock(id, stock);
+    if (res.demo) {
+      setList((prev) => prev.map((p) => (p.id === id ? { ...p, stock } : p)));
+    } else if (res.ok) {
+      setList(res.products);
+    }
+    setStockSavingId(null);
+    setStockDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const adjustStock = (p, delta) => saveStock(p.id, Number(p.stock ?? 0) + delta);
+
   return (
     <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
       <div className="flex items-center justify-between">
@@ -118,29 +142,77 @@ export default function AdminDashboard() {
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Price</th>
+              <th className="px-4 py-3">Stock</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--color-forest)]/10">
-            {list.map((p) => (
-              <tr key={p.id}>
-                <td className="px-4 py-3 font-medium">{p.name}</td>
-                <td className="px-4 py-3">{p.category}</td>
-                <td className="px-4 py-3">{p.price ? `₹${p.price}` : "—"}</td>
-                <td className="px-4 py-3">
-                  {p.comingSoon ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">Coming Soon</span>
-                  ) : (
-                    <span className="rounded-full bg-green-100 px-2 py-1 text-xs text-green-700">Live</span>
-                  )}
-                </td>
-                <td className="space-x-3 px-4 py-3 text-right">
-                  <button onClick={() => startEdit(p)} className="font-medium text-[var(--color-forest-dark)] hover:underline">Edit</button>
-                  <button onClick={() => handleDelete(p.id)} className="font-medium text-red-600 hover:underline">Delete</button>
-                </td>
-              </tr>
-            ))}
+            {list.map((p) => {
+              const outOfStock = !p.comingSoon && Number(p.stock ?? 0) <= 0;
+              const draft = stockDrafts[p.id];
+              return (
+                <tr key={p.id}>
+                  <td className="px-4 py-3 font-medium">{p.name}</td>
+                  <td className="px-4 py-3">{p.category}</td>
+                  <td className="px-4 py-3">{p.price ? `₹${p.price}` : "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => adjustStock(p, -1)}
+                        disabled={stockSavingId === p.id || Number(p.stock ?? 0) <= 0}
+                        className="h-7 w-7 rounded-full border border-[var(--color-forest)]/20 text-sm leading-none disabled:opacity-30"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={draft ?? p.stock ?? 0}
+                        onChange={(e) =>
+                          setStockDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                        }
+                        onBlur={(e) => {
+                          if (e.target.value === "" || Number(e.target.value) === Number(p.stock ?? 0)) {
+                            setStockDrafts((prev) => {
+                              const next = { ...prev };
+                              delete next[p.id];
+                              return next;
+                            });
+                            return;
+                          }
+                          saveStock(p.id, e.target.value);
+                        }}
+                        disabled={stockSavingId === p.id}
+                        className="w-16 rounded-lg border border-[var(--color-forest)]/20 px-2 py-1 text-center text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => adjustStock(p, 1)}
+                        disabled={stockSavingId === p.id}
+                        className="h-7 w-7 rounded-full border border-[var(--color-forest)]/20 text-sm leading-none disabled:opacity-30"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.comingSoon ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">Coming Soon</span>
+                    ) : outOfStock ? (
+                      <span className="rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">Out of Stock</span>
+                    ) : (
+                      <span className="rounded-full bg-green-100 px-2 py-1 text-xs text-green-700">Live</span>
+                    )}
+                  </td>
+                  <td className="space-x-3 px-4 py-3 text-right">
+                    <button onClick={() => startEdit(p)} className="font-medium text-[var(--color-forest-dark)] hover:underline">Edit</button>
+                    <button onClick={() => handleDelete(p.id)} className="font-medium text-red-600 hover:underline">Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -169,6 +241,14 @@ export default function AdminDashboard() {
                 <input type="number" placeholder="Price (₹)" value={editing.price ?? ""}
                   onChange={(e) => setEditing({ ...editing, price: e.target.value })}
                   className="rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <input type="number" min="0" placeholder="Stock (units available)" value={editing.stock ?? ""}
+                  onChange={(e) => setEditing({ ...editing, stock: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm" />
+                <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
+                  Product auto-shows "Out of Stock" on the site once this hits 0.
+                </p>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={editing.comingSoon}

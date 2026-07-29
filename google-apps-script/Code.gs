@@ -17,7 +17,15 @@
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
  *    Products     | Id | Name | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
- *                 | Ingredients(JSON) | Specifications(JSON)
+ *                 | Ingredients(JSON) | Specifications(JSON) | Stock
+ *
+ *    NOTE ON INVENTORY: The "Stock" column (column L) holds how many
+ *    units of that product are currently available. The admin panel's
+ *    "Manage Inventory" controls read/write this column directly. When
+ *    a payment is verified (handleVerifyPayment), stock is automatically
+ *    decremented by the quantity purchased. Once a product's Stock
+ *    reaches 0, the storefront automatically shows it as "Out of Stock"
+ *    and disables Add to Bag for it — no manual step needed.
  *
  * 2. Extensions > Apps Script, paste this file's contents as Code.gs.
  * 3. Project Settings > Script Properties, add:
@@ -78,6 +86,8 @@ function doPost(e) {
         return jsonResponse(handleUpsertProduct(payload));
       case "deleteProduct":
         return jsonResponse(handleDeleteProduct(payload));
+      case "updateStock":
+        return jsonResponse(handleUpdateStock(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -189,63 +199,108 @@ function handleEnquiry({ name, email, phone, message }) {
 // ---------------- Orders ----------------
 
 function handlePlaceOrder({ items, customer, amount }) {
-  const orderId = "ORD" + new Date().getTime();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-  // Create a Razorpay Order via their API (requires Key Id/Secret in
-  // Script Properties) so the frontend gets a valid order_id to open
-  // the Razorpay Checkout with.
-  const props = PropertiesService.getScriptProperties();
-  const keyId = props.getProperty("RAZORPAY_KEY_ID");
-  const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+  try {
+    // ---- Stock check: refuse the order if anything in the cart has
+    // sold out or doesn't have enough units left, so we never oversell.
+    const stockError = checkStockAvailability(items);
+    if (stockError) return { ok: false, message: stockError };
 
-  if (!keyId || !keySecret) {
-    return {
-      ok: false,
-      message: "Razorpay is not configured yet. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Script Properties.",
-    };
+    const orderId = "ORD" + new Date().getTime();
+
+    // Create a Razorpay Order via their API (requires Key Id/Secret in
+    // Script Properties) so the frontend gets a valid order_id to open
+    // the Razorpay Checkout with.
+    const props = PropertiesService.getScriptProperties();
+    const keyId = props.getProperty("RAZORPAY_KEY_ID");
+    const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+
+    if (!keyId || !keySecret) {
+      return {
+        ok: false,
+        message: "Razorpay is not configured yet. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Script Properties.",
+      };
+    }
+
+    const rzpRes = UrlFetchApp.fetch("https://api.razorpay.com/v1/orders", {
+      method: "post",
+      contentType: "application/json",
+      headers: {
+        Authorization:
+          "Basic " + Utilities.base64Encode(keyId + ":" + keySecret),
+      },
+      payload: JSON.stringify({
+        amount: amount * 100,
+        currency: "INR",
+        receipt: orderId,
+      }),
+      muteHttpExceptions: true,
+    });
+    const rzpOrder = JSON.parse(rzpRes.getContentText());
+
+    if (!rzpOrder.id) {
+      // Razorpay rejected the request — usually bad/missing API keys, or
+      // Razorpay account not yet activated. Surface a clear error instead
+      // of silently saving a broken order.
+      const reason = (rzpOrder.error && rzpOrder.error.description) || "Unknown error";
+      return { ok: false, message: "Could not create payment order: " + reason };
+    }
+
+    getSheet("Orders").appendRow([
+      orderId,
+      JSON.stringify(items),
+      customer.name,
+      customer.email,
+      customer.phone,
+      customer.line1,
+      customer.city,
+      customer.pincode,
+      amount,
+      "Pending",
+      rzpOrder.id || "",
+      "",
+      new Date(),
+    ]);
+
+    return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
+  } finally {
+    lock.releaseLock();
   }
+}
 
-  const rzpRes = UrlFetchApp.fetch("https://api.razorpay.com/v1/orders", {
-    method: "post",
-    contentType: "application/json",
-    headers: {
-      Authorization:
-        "Basic " + Utilities.base64Encode(keyId + ":" + keySecret),
-    },
-    payload: JSON.stringify({
-      amount: amount * 100,
-      currency: "INR",
-      receipt: orderId,
-    }),
-    muteHttpExceptions: true,
+// Checks the Products sheet's Stock column against the quantities being
+// ordered. Returns a human-readable error message string if something
+// is unavailable, or null if the whole cart can be fulfilled.
+function checkStockAvailability(items) {
+  const rows = getSheet("Products").getDataRange().getValues();
+  for (const item of items) {
+    const row = rows.find((r) => r[0] === item.id);
+    if (!row) continue; // unknown product id — let it through, nothing to check
+    const available = Number(row[11]) || 0;
+    if (available <= 0) {
+      return `Sorry, "${row[1]}" just sold out. Please remove it from your bag.`;
+    }
+    if (available < Number(item.qty || 0)) {
+      return `Sorry, only ${available} left of "${row[1]}". Please lower the quantity in your bag.`;
+    }
+  }
+  return null;
+}
+
+// Subtracts purchased quantities from the Products sheet's Stock column.
+// Never goes below 0.
+function deductStock(items) {
+  const sheet = getSheet("Products");
+  const rows = sheet.getDataRange().getValues();
+  items.forEach((item) => {
+    const rowIndex = rows.findIndex((r) => r[0] === item.id);
+    if (rowIndex === -1) return;
+    const current = Number(rows[rowIndex][11]) || 0;
+    const next = Math.max(0, current - Number(item.qty || 0));
+    sheet.getRange(rowIndex + 1, 12).setValue(next); // column L = Stock
   });
-  const rzpOrder = JSON.parse(rzpRes.getContentText());
-
-  if (!rzpOrder.id) {
-    // Razorpay rejected the request — usually bad/missing API keys, or
-    // Razorpay account not yet activated. Surface a clear error instead
-    // of silently saving a broken order.
-    const reason = (rzpOrder.error && rzpOrder.error.description) || "Unknown error";
-    return { ok: false, message: "Could not create payment order: " + reason };
-  }
-
-  getSheet("Orders").appendRow([
-    orderId,
-    JSON.stringify(items),
-    customer.name,
-    customer.email,
-    customer.phone,
-    customer.line1,
-    customer.city,
-    customer.pincode,
-    amount,
-    "Pending",
-    rzpOrder.id || "",
-    "",
-    new Date(),
-  ]);
-
-  return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
 }
 
 function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature }) {
@@ -264,15 +319,28 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
     return { ok: false, message: "Signature mismatch." };
   }
 
-  // Mark order as Paid in the sheet
-  const sheet = getSheet("Orders");
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === orderId) {
-      sheet.getRange(i + 1, 10).setValue("Paid"); // Status column
-      sheet.getRange(i + 1, 12).setValue(razorpay_payment_id); // RazorpayPaymentId column
-      break;
+  // Mark order as Paid in the sheet, and deduct stock — guarded by a
+  // lock + an "already Paid" check so a retried/duplicate verification
+  // call never deducts stock twice for the same order.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Orders");
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === orderId) {
+        const alreadyPaid = rows[i][9] === "Paid";
+        sheet.getRange(i + 1, 10).setValue("Paid"); // Status column
+        sheet.getRange(i + 1, 12).setValue(razorpay_payment_id); // RazorpayPaymentId column
+        if (!alreadyPaid) {
+          const items = safeParse(rows[i][1], []); // Items(JSON) column
+          deductStock(items);
+        }
+        break;
+      }
     }
+  } finally {
+    lock.releaseLock();
   }
 
   return { ok: true };
@@ -315,6 +383,7 @@ function handleListProducts() {
       comingSoon: r[5] === true || r[5] === "TRUE", image: r[6],
       shortDescription: r[7], description: r[8],
       ingredients: safeParse(r[9], []), specifications: safeParse(r[10], {}),
+      stock: Number(r[11]) || 0,
     }));
   return { ok: true, products };
 }
@@ -326,7 +395,7 @@ function handleUpsertProduct(p) {
   const rowData = [
     p.id, p.name, p.tagline, p.category, p.price, p.comingSoon, p.image,
     p.shortDescription, p.description, JSON.stringify(p.ingredients || []),
-    JSON.stringify(p.specifications || {}),
+    JSON.stringify(p.specifications || {}), Number(p.stock) || 0,
   ];
   if (rowIndex === -1) {
     sheet.appendRow(rowData);
@@ -342,6 +411,24 @@ function handleDeleteProduct({ id }) {
   const rowIndex = rows.findIndex((r) => r[0] === id);
   if (rowIndex > -1) sheet.deleteRow(rowIndex + 1);
   return handleListProducts();
+}
+
+// Quick inventory-only update (used by the admin panel's "Manage
+// Inventory" stepper) — only touches the Stock column, so it can't
+// accidentally clobber other fields someone else may be editing.
+function handleUpdateStock({ id, stock }) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Products");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r) => r[0] === id);
+    if (rowIndex === -1) return { ok: false, message: "Product not found." };
+    sheet.getRange(rowIndex + 1, 12).setValue(Math.max(0, Number(stock) || 0)); // column L = Stock
+    return handleListProducts();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function safeParse(str, fallback) {

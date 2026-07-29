@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { products, CATEGORIES } from "../data/products";
+import { CATEGORIES } from "../data/products";
+import { useProducts } from "../context/ProductsContext";
 import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
 
 export default function Products() {
+  const { products } = useProducts();
   const [filter, setFilter] = useState("All");
   const visible =
     filter === "All" ? products : products.filter((p) => p.category === filter);

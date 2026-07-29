@@ -27,11 +27,20 @@ export default function Cart() {
             <div className="flex-1">
               <h3 className="font-medium">{item.name}</h3>
               <p className="text-sm text-[var(--color-charcoal)]/60">₹{item.price} each</p>
+              {Number(item.stock ?? Infinity) <= item.qty && (
+                <p className="mt-0.5 text-xs text-amber-600">Max available in stock</p>
+              )}
             </div>
             <div className="flex items-center rounded-full border border-[var(--color-forest)]/20">
               <button onClick={() => updateQty(item.id, item.qty - 1)} className="px-3 py-1.5">−</button>
               <span className="w-6 text-center text-sm">{item.qty}</span>
-              <button onClick={() => updateQty(item.id, item.qty + 1)} className="px-3 py-1.5">+</button>
+              <button
+                onClick={() => updateQty(item.id, item.qty + 1)}
+                disabled={item.qty >= Number(item.stock ?? Infinity)}
+                className="px-3 py-1.5 disabled:opacity-30"
+              >
+                +
+              </button>
             </div>
             <span className="w-16 text-right font-medium">₹{item.price * item.qty}</span>
             <button onClick={() => removeItem(item.id)} className="text-xs text-red-500 hover:underline">Remove</button>

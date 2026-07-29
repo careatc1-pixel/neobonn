@@ -12,6 +12,7 @@ export const products = [
     category: "Face",
     price: 599,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/instant-brightening-milk-serum.jpg",
     shortDescription:
@@ -37,6 +38,7 @@ export const products = [
     category: "Face",
     price: 399,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/hydrating-cleanser.jpg",
     shortDescription:
@@ -62,6 +64,7 @@ export const products = [
     category: "Face",
     price: 649,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/radiance-serum.jpg",
     shortDescription:
@@ -87,6 +90,7 @@ export const products = [
     category: "Face",
     price: 549,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/peel-off-collagen-algine-face-mask.jpg",
     shortDescription:
@@ -113,6 +117,7 @@ export const products = [
     category: "Face",
     price: 249,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/neobonn-lip-balm.jpg",
     shortDescription:
@@ -138,6 +143,7 @@ export const products = [
     category: "Coming Soon",
     price: null,
     comingSoon: true,
+    stock: 0,
     dermatologicallyApproved: true,
     image: "/products/vitamin-c-serum.jpg",
     shortDescription:
@@ -159,6 +165,7 @@ export const products = [
     category: "Body",
     price: 249,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/multani-mitti.jpg",
     shortDescription:
@@ -180,6 +187,7 @@ export const products = [
     category: "Body",
     price: 249,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/aloevera-lemongrass.jpg",
     shortDescription:
@@ -201,6 +209,7 @@ export const products = [
     category: "Body",
     price: 279,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/charcoal-black-oud.jpg",
     shortDescription:
@@ -222,6 +231,7 @@ export const products = [
     category: "Body",
     price: 249,
     comingSoon: false,
+    stock: 25,
     dermatologicallyApproved: true,
     image: "/products/papaya-way.jpg",
     shortDescription:

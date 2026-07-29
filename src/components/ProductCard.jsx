@@ -2,21 +2,32 @@ import { Link } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 
 export default function ProductCard({ product }) {
+  const outOfStock = !product.comingSoon && Number(product.stock ?? 0) <= 0;
+
   return (
     <Link
       to={`/products/${product.id}`}
-      className="group block overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white/60 transition-shadow hover:shadow-lg"
+      className={`group block overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white/60 transition-shadow hover:shadow-lg ${
+        outOfStock ? "opacity-70" : ""
+      }`}
     >
       <div className="relative aspect-square overflow-hidden bg-[var(--color-cream-deep)]">
         <img
           src={product.image}
           alt={product.name}
           onError={(e) => (e.currentTarget.style.opacity = 0)}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+            outOfStock ? "grayscale" : ""
+          }`}
         />
         {product.comingSoon && (
           <span className="absolute left-3 top-3 rounded-full bg-[var(--color-forest-dark)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">
             Coming Soon
+          </span>
+        )}
+        {outOfStock && (
+          <span className="absolute left-3 top-3 rounded-full bg-red-600/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">
+            Out of Stock
           </span>
         )}
       </div>
@@ -33,7 +44,11 @@ export default function ProductCard({ product }) {
 
         <div className="mt-3 flex items-center justify-between">
           <span className="font-semibold text-[var(--color-charcoal)]">
-            {product.comingSoon ? "Notify Me" : `₹${product.price}`}
+            {product.comingSoon
+              ? "Notify Me"
+              : outOfStock
+                ? "Out of Stock"
+                : `₹${product.price}`}
           </span>
           <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-gold)] opacity-0 transition-opacity group-hover:opacity-100">
             View →
