@@ -36,7 +36,7 @@ export default function Footer() {
       {/* Soft ambient glow behind the logo, echoing the hero section */}
       <div className="pointer-events-none absolute left-1/2 top-16 h-64 w-64 -translate-x-1/2 rounded-full bg-[var(--color-gold)]/10 blur-3xl" />
 
-      <div className="relative mx-auto max-w-4xl px-5 pb-12 pt-14 text-center md:px-8">
+      <div className="relative mx-auto max-w-[1120px] px-5 pb-12 pt-14 text-center md:px-8">
         {/* Logo + wordmark */}
         <Link to="/" className="inline-flex flex-col items-center gap-2.5">
           <img src={logo} alt="neobonn icon" className="h-16 w-auto object-contain drop-shadow-sm" />

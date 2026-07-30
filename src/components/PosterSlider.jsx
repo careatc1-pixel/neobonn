@@ -57,7 +57,7 @@ export default function PosterSlider({
 
   return (
     <section
-      className="mx-auto max-w-7xl px-5 py-16 md:px-8"
+      className="mx-auto max-w-[1600px] px-5 py-16 md:px-8"
       aria-roledescription="carousel"
       aria-label="Neobonn product range highlights"
     >

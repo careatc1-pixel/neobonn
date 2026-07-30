@@ -2,7 +2,7 @@ import { COMPANY } from "../data/company";
 
 export default function About() {
   return (
-    <div className="mx-auto max-w-4xl px-5 py-20 md:px-8">
+    <div className="mx-auto max-w-[1120px] px-5 py-20 md:px-8">
       <p className="text-center text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
         Our Story
       </p>

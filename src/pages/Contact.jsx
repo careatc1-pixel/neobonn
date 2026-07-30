@@ -18,7 +18,7 @@ export default function Contact() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-20 md:px-8">
+    <div className="mx-auto max-w-[1440px] px-5 py-20 md:px-8">
       <div className="grid gap-14 md:grid-cols-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">

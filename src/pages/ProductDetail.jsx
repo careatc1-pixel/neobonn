@@ -17,7 +17,7 @@ export default function ProductDetail() {
 
   if (!product) {
     if (loading) {
-      return <div className="mx-auto max-w-6xl px-5 py-24 text-center text-[var(--color-charcoal)]/50">Loading…</div>;
+      return <div className="mx-auto max-w-[1440px] px-5 py-24 text-center text-[var(--color-charcoal)]/50">Loading…</div>;
     }
     return <Navigate to="/products" replace />;
   }
@@ -43,7 +43,7 @@ export default function ProductDetail() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-16 md:px-8">
+    <div className="mx-auto max-w-[1440px] px-5 py-16 md:px-8">
       <nav className="mb-8 text-sm text-[var(--color-charcoal)]/50">
         <Link to="/products" className="hover:text-[var(--color-forest-dark)]">Shop</Link> / {product.name}
       </nav>

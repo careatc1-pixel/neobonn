@@ -32,7 +32,7 @@ const categories = [
 // Circular category strip, sitting just under the sale hero — new section only.
 export default function CategoryStrip() {
   return (
-    <section id="shop-by-category" className="mx-auto max-w-7xl px-5 py-10 md:px-8 md:py-14">
+    <section id="shop-by-category" className="mx-auto max-w-[1600px] px-5 py-10 md:px-8 md:py-14">
       <p className="text-center text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
         Shop by Category
       </p>

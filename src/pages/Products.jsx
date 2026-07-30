@@ -24,7 +24,7 @@ export default function Products() {
     filter === "All" ? products : products.filter((p) => p.category === filter);
 
   return (
-    <div className="mx-auto max-w-7xl px-5 py-16 md:px-8">
+    <div className="mx-auto max-w-[1600px] px-5 py-16 md:px-8">
       <div className="mb-10 text-center">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
           The Collection

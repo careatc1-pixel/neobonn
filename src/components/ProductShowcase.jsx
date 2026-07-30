@@ -50,7 +50,7 @@ function ShowcaseSlide({ slide, index }) {
 export default function ProductShowcase() {
   return (
     <section className="bg-[var(--color-cream-deep)] py-20">
-      <div className="mx-auto max-w-5xl px-5 md:px-8">
+      <div className="mx-auto max-w-[1320px] px-5 md:px-8">
         <div className="mb-12 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
             Discover neobonn

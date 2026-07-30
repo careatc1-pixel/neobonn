@@ -20,7 +20,7 @@ export default function Home() {
 
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pb-20 pt-16 md:px-8 md:pt-24">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 md:grid-cols-2">
+        <div className="mx-auto grid max-w-[1600px] items-center gap-12 md:grid-cols-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
               Atharv Luxe Co. presents
@@ -75,7 +75,7 @@ export default function Home() {
 
       {/* Trust strip */}
       <section className="border-y border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] px-5 py-8 md:px-8">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 text-center sm:grid-cols-3">
+        <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-6 text-center sm:grid-cols-3">
           {[
             { icon: Leaf, label: "100% Natural Ingredients" },
             { icon: ShieldCheck, label: "Dermatologically Mindful" },
@@ -90,7 +90,7 @@ export default function Home() {
       </section>
 
       {/* Products */}
-      <section className="mx-auto max-w-7xl px-5 py-20 md:px-8">
+      <section className="mx-auto max-w-[1600px] px-5 py-20 md:px-8">
         <div className="mb-10 flex items-end justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">

@@ -25,7 +25,7 @@ export default function PromoBanner() {
       {/* subtle animated rain-stripe backdrop */}
       <div className="pointer-events-none absolute inset-0 opacity-10 [background:repeating-linear-gradient(115deg,white_0px,white_1px,transparent_1px,transparent_14px)]" />
 
-      <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-10 py-2.5 text-center sm:px-8">
+      <div className="relative mx-auto flex max-w-[1600px] flex-wrap items-center justify-center gap-x-3 gap-y-1 px-10 py-2.5 text-center sm:px-8">
         <CloudRain size={16} className="shrink-0 text-[var(--color-gold-light)]" />
         <p className="text-xs font-medium tracking-wide sm:text-sm">
           <span className="font-bold uppercase text-[var(--color-gold-light)]">

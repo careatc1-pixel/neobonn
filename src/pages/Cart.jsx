@@ -17,7 +17,7 @@ export default function Cart() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-16 md:px-8">
+    <div className="mx-auto max-w-[1120px] px-5 py-16 md:px-8">
       <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">Your Bag</h1>
 
       <div className="mt-8 divide-y divide-[var(--color-forest)]/10">
