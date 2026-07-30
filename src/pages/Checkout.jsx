@@ -3,6 +3,7 @@ import { useNavigate, Navigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
+import SEO from "../components/SEO";
 
 // Loads the Razorpay Checkout script once.
 function loadRazorpayScript() {
@@ -115,6 +116,7 @@ export default function Checkout() {
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-16 md:px-8">
+      <SEO title="Checkout" path="/checkout" noindex />
       <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">Checkout</h1>
 
       <form onSubmit={handlePay} className="mt-8 space-y-4">

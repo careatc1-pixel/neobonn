@@ -1,8 +1,14 @@
 import { COMPANY } from "../data/company";
+import SEO from "../components/SEO";
 
 export default function About() {
   return (
     <div className="mx-auto max-w-[1120px] px-5 py-20 md:px-8">
+      <SEO
+        title="Our Story"
+        description={`Learn about ${COMPANY.brand}'s wellness philosophy — natural botanicals, pure ingredients, and a daily ritual of self-care.`}
+        path="/about"
+      />
       <p className="text-center text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
         Our Story
       </p>

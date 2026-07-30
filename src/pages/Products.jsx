@@ -3,6 +3,7 @@ import { CATEGORIES } from "../data/products";
 import { useProducts } from "../context/ProductsContext";
 import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
+import SEO from "../components/SEO";
 
 function ProductCardSkeleton() {
   return (
@@ -25,6 +26,11 @@ export default function Products() {
 
   return (
     <div className="mx-auto max-w-[1600px] px-5 py-16 md:px-8">
+      <SEO
+        title="Shop All Products"
+        description="Browse neobonn's full range — face serums, peel-off masks, natural soaps, hair oils & wellness rituals. All skin types, dermatologically approved, cruelty-free."
+        path="/products"
+      />
       <div className="mb-10 text-center">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
           The Collection

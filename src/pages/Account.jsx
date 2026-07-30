@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { Package } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
+import SEO from "../components/SEO";
 
 function StatusBadge({ status }) {
   const isPaid = (status || "").toLowerCase() === "paid";
@@ -43,6 +44,7 @@ export default function Account() {
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-16 md:px-8">
+      <SEO title="My Account" path="/account" noindex />
       <div className="text-center">
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">
           Hi, {user.name} 👋

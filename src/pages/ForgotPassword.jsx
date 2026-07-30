@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import SEO from "../components/SEO";
 
 export default function ForgotPassword() {
   const { requestOtp, resetPassword } = useAuth();
@@ -46,6 +47,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-5 py-16">
+      <SEO title="Forgot Password" path="/forgot-password" noindex />
       <h1 className="text-center font-display text-3xl text-[var(--color-forest-dark)]">
         Reset Password
       </h1>

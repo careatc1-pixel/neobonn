@@ -6,12 +6,30 @@ import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
 import SaleHeroBanner from "../components/SaleHeroBanner";
 import CategoryStrip from "../components/CategoryStrip";
+import SEO, { SITE_URL } from "../components/SEO";
 
 const heroSlides = posterSlides.filter((s) => s.id !== "brand-banner");
+
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "neobonn",
+  url: SITE_URL,
+  logo: `${SITE_URL}/logo.png`,
+  description:
+    "neobonn is a skin care & wellness brand crafting handmade soaps, serums, and rituals from natural botanicals.",
+};
 
 export default function Home() {
   return (
     <div>
+      <SEO
+        title="Natural Skin Care & Wellness Products"
+        description="Handcrafted soaps, brightening serums, face masks & lip balm made with natural botanicals like aloe vera, multani mitti, and white water lily. Dermatologically approved, cruelty-free."
+        path="/"
+        jsonLd={organizationJsonLd}
+      />
+
       {/* Sale hero banner (new) */}
       <SaleHeroBanner />
 

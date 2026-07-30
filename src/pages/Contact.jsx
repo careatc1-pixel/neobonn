@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Phone, Mail, MapPin } from "lucide-react";
 import { COMPANY } from "../data/company";
 import { SheetsAPI } from "../lib/sheets";
+import SEO from "../components/SEO";
 
 export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", message: "" });
@@ -19,6 +20,11 @@ export default function Contact() {
 
   return (
     <div className="mx-auto max-w-[1440px] px-5 py-20 md:px-8">
+      <SEO
+        title="Contact Us"
+        description={`Get in touch with ${COMPANY.brand} — questions about orders, ingredients, or wholesale enquiries.`}
+        path="/contact"
+      />
       <div className="grid gap-14 md:grid-cols-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">

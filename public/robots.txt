@@ -1,0 +1,17 @@
+User-agent: *
+Allow: /
+
+# Don't crawl private / account / checkout flows or the admin area —
+# these have no SEO value and shouldn't show up in search results.
+Disallow: /admin
+Disallow: /admin/dashboard
+Disallow: /cart
+Disallow: /checkout
+Disallow: /order-success
+Disallow: /account
+Disallow: /login
+Disallow: /login/customer
+Disallow: /signup
+Disallow: /forgot-password
+
+Sitemap: https://www.neobonn.com/sitemap.xml
