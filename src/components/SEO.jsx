@@ -1,5 +1,7 @@
-import { Helmet } from "react-helmet-async";
-
+// React 19 automatically hoists <title>, <meta>, and <link> tags rendered
+// anywhere in the component tree up into the document <head> — no library
+// (react-helmet etc.) needed. See: https://react.dev/reference/react-dom/components/title
+//
 // ⚠️ IMPORTANT: change this to your real live domain (the one connected in
 // Hostinger + Vercel). Every canonical URL, sitemap entry, and Open Graph
 // tag is built from this one value, so getting it right here fixes the
@@ -9,7 +11,7 @@ export const SITE_NAME = "neobonn";
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/logo.png`;
 
 /**
- * Drop this at the top of any page component:
+ * Drop this at the top of any page component's return JSX:
  *   <SEO title="..." description="..." path="/products" />
  *
  * `jsonLd` is optional — pass a schema.org object (e.g. Product schema)
@@ -27,7 +29,7 @@ export default function SEO({
   const canonical = `${SITE_URL}${path === "/" ? "" : path}`;
 
   return (
-    <Helmet>
+    <>
       <title>{fullTitle}</title>
       {description && <meta name="description" content={description} />}
       <link rel="canonical" href={canonical} />
@@ -51,6 +53,6 @@ export default function SEO({
       {jsonLd && (
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
       )}
-    </Helmet>
+    </>
   );
 }
