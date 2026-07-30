@@ -392,6 +392,8 @@ export default function AdminDashboard() {
                   className="rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm">
                   <option>Face</option>
                   <option>Body</option>
+                  <option>Hair</option>
+                  <option>Wellness</option>
                   <option>Coming Soon</option>
                 </select>
                 <input type="number" placeholder="Price (₹)" value={editing.price ?? ""}

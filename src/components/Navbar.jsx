@@ -24,8 +24,8 @@ export default function Navbar() {
         <Link to="/" className="flex items-center gap-2.5">
           <img src={logo} alt="neobonn icon" className="h-11 w-auto object-contain md:h-14" />
           <span className="flex flex-col leading-none">
-            <span className="font-display text-xl tracking-wide text-[var(--color-forest-dark)] md:text-2xl">
-              neobonn
+            <span className="font-display text-xl tracking-wide md:text-2xl">
+              <span className="text-[var(--color-forest-dark)]">neo</span><span className="text-[var(--color-gold)]">bonn</span>
             </span>
             <span className="mt-0.5 whitespace-nowrap text-[8px] font-semibold uppercase tracking-[0.15em] text-[var(--color-gold)] md:text-[9px]">
               {COMPANY.tagline}

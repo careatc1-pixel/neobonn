@@ -2,7 +2,7 @@
 // The Admin Panel edits this same shape of data (persisted to Google Sheets
 // in production — see /google-apps-script/Code.gs and src/lib/sheets.js).
 
-export const CATEGORIES = ["Face", "Body", "Coming Soon"];
+export const CATEGORIES = ["Face", "Body", "Hair", "Wellness", "Coming Soon"];
 
 export const products = [
   {
@@ -244,6 +244,105 @@ export const products = [
       "Weight": "100g",
       "Shelf Life": "18 months",
       "Dermatologically Approved": "Yes",
+    },
+  },
+  {
+    id: "neobonn-argan-hair-serum",
+    name: "Neobonn Argan Hair Serum",
+    tagline: "Silk-smooth shine, root to tip",
+    category: "Hair",
+    price: 449,
+    comingSoon: false,
+    stock: 25,
+    dermatologicallyApproved: true,
+    image: "/products/argan-hair-serum.svg",
+    shortDescription:
+      "A lightweight serum that tames frizz and locks in shine without weighing hair down.",
+    description:
+      "Part of the Neobonn Wellness Journey, this Argan Hair Serum blends cold-pressed Argan Oil with Vitamin E to smooth the cuticle, calm frizz, and add a natural, glass-like shine. A few drops on damp or dry hair leave it silky, manageable, and protected from daily heat and humidity — no greasy residue.",
+    ingredients: [
+      "Cold-Pressed Argan Oil (Shine & Smoothing)",
+      "Vitamin E (Protection & Repair)",
+      "Jojoba Oil (Lightweight Nourishment)",
+    ],
+    specifications: {
+      "Hair Type": "All hair types",
+      "Volume": "50ml",
+      "Shelf Life": "18 months",
+      "Dermatologically Approved": "Yes",
+    },
+  },
+  {
+    id: "neobonn-onion-biotin-hair-oil",
+    name: "Neobonn Onion & Biotin Hair Oil",
+    tagline: "Nourish, strengthen, revive",
+    category: "Hair",
+    price: 399,
+    comingSoon: false,
+    stock: 25,
+    dermatologicallyApproved: true,
+    image: "/products/onion-biotin-hair-oil.svg",
+    shortDescription:
+      "A strengthening scalp oil built on red onion extract and biotin to reduce hair fall.",
+    description:
+      "Neobonn's Onion & Biotin Hair Oil combines Red Onion Extract, known for strengthening hair from the root, with Biotin to support natural growth and Curry Leaf Extract to nourish the scalp. Regular massage with this oil helps reduce hair fall and leaves hair feeling thicker and more resilient over time.",
+    ingredients: [
+      "Red Onion Extract (Root Strengthening)",
+      "Biotin (Growth Support)",
+      "Curry Leaf Extract (Scalp Nourishment)",
+    ],
+    specifications: {
+      "Hair Type": "All hair types",
+      "Volume": "100ml",
+      "Shelf Life": "18 months",
+      "Dermatologically Approved": "Yes",
+    },
+  },
+  {
+    id: "neobonn-calm-body-mist",
+    name: "Neobonn Calm Body Mist",
+    tagline: "A moment of stillness, bottled",
+    category: "Wellness",
+    price: 349,
+    comingSoon: false,
+    stock: 25,
+    dermatologicallyApproved: true,
+    image: "/products/calm-body-mist.svg",
+    shortDescription:
+      "A lavender and chamomile mist to ease tension and settle the mind, anytime.",
+    description:
+      "Unveiling Neobonn's Complete Wellness Journey — this Calm Body Mist pairs Lavender Water with Chamomile Extract to gently ease tension and quiet a busy mind. Mist it over skin, linens, or the air around you for a soft, calming ritual that fits into any part of the day.",
+    ingredients: [
+      "Lavender Water (Calming & Soothing)",
+      "Chamomile Extract (Relaxation)",
+      "Aloe Vera (Hydration)",
+    ],
+    specifications: {
+      "Skin Type": "All skin types",
+      "Volume": "100ml",
+      "Shelf Life": "12 months",
+      "Dermatologically Approved": "Yes",
+    },
+  },
+  {
+    id: "neobonn-herbal-detox-tea",
+    name: "Neobonn Herbal Detox Tea",
+    tagline: "Sip your way to balance",
+    category: "Wellness",
+    price: 299,
+    comingSoon: false,
+    stock: 25,
+    dermatologicallyApproved: false,
+    image: "/products/herbal-detox-tea.svg",
+    shortDescription:
+      "A caffeine-free herbal blend of tulsi, ginger, and lemongrass to support daily digestion.",
+    description:
+      "Rounding out the Neobonn Wellness Journey from the inside, this Herbal Detox Tea blends Tulsi, Ginger, and Lemongrass — a caffeine-free infusion to support digestion and add a calm, grounding ritual to your morning or evening.",
+    ingredients: ["Tulsi (Holy Basil)", "Dried Ginger", "Lemongrass", "Fennel Seeds"],
+    specifications: {
+      "Weight": "100g (approx. 40 cups)",
+      "Shelf Life": "12 months",
+      "Caffeine": "Free",
     },
   },
 ];
