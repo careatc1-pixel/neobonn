@@ -15,7 +15,7 @@
  *    Orders       | OrderId | Items(JSON) | CustomerName | Email | Phone
  *                 | Address | City | Pincode | Amount | Status
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
- *    Products     | Id | Name | Tagline | Category | Price | ComingSoon
+ *    Products     | Id | Name | SeoTitle | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
  *
@@ -56,7 +56,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-07-29-inventory-v2";
+const CODE_VERSION = "2026-07-31-seo-title-v3";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -84,7 +84,7 @@ function doGet() {
 // a column by hand, or a CSV import ever shifts things. This is what
 // prevents "wrong column read as Stock" / "row silently dropped" bugs.
 const PRODUCT_COLUMNS = [
-  "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
+  "Id", "Name", "SeoTitle", "Tagline", "Category", "Price", "ComingSoon", "Image",
   "ShortDescription", "Description", "Ingredients(JSON)", "Specifications(JSON)", "Stock",
 ];
 
@@ -121,6 +121,7 @@ function rowToProductObject(row, colMap) {
   return {
     id,
     name: val("Name"),
+    seoTitle: val("SeoTitle"),
     tagline: val("Tagline"),
     category: val("Category"),
     price: val("Price") || null,
@@ -141,6 +142,7 @@ function productToRowArray(p, colMap) {
   };
   set("Id", p.id);
   set("Name", p.name);
+  set("SeoTitle", p.seoTitle);
   set("Tagline", p.tagline);
   set("Category", p.category);
   set("Price", p.price);
