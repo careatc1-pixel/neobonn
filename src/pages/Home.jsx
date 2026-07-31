@@ -73,9 +73,6 @@ export default function Home() {
             <video
               className="relative w-full max-w-md rounded-2xl md:max-w-lg"
               src="/videos/hero-logo.mp4"
-              width="640"
-              height="360"
-              preload="auto"
               autoPlay
               loop
               muted
