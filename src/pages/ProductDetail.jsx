@@ -66,7 +66,7 @@ export default function ProductDetail() {
   return (
     <div className="mx-auto max-w-[1440px] px-5 py-16 md:px-8">
       <SEO
-        title={product.name}
+        title={product.seoTitle || product.name}
         description={product.shortDescription || product.description}
         path={`/products/${product.id}`}
         image={`${SITE_URL}${product.image}`}
