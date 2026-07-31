@@ -4,6 +4,7 @@ import SplashScreen from "./components/SplashScreen";
 import PromoBanner from "./components/PromoBanner";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import AnalyticsRouteTracker from "./components/AnalyticsRouteTracker";
 
 import Home from "./pages/Home";
 import Products from "./pages/Products";
@@ -43,6 +44,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <AnalyticsRouteTracker />
       <PromoBanner />
       <Navbar />
       <main className="flex-1">
