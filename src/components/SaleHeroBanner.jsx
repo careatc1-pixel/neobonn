@@ -5,7 +5,7 @@ import { Leaf, ShieldCheck, Sparkles } from "lucide-react";
 // New section only — does not touch or replace the existing brand Hero below it.
 export default function SaleHeroBanner() {
   return (
-    <section className="mx-auto max-w-7xl px-5 pt-6 md:px-8 md:pt-10">
+    <section className="mx-auto max-w-[1600px] px-5 pt-6 md:px-8 md:pt-10">
       <div className="relative overflow-hidden rounded-3xl bg-[var(--color-forest-dark)] shadow-xl shadow-black/10">
         {/* Ambient glows */}
         <div className="pointer-events-none absolute -left-16 -top-16 h-72 w-72 rounded-full bg-[var(--color-gold)]/20 blur-3xl" />

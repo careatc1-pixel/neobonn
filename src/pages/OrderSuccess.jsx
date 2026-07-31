@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
+import SEO from "../components/SEO";
 
 export default function OrderSuccess() {
   return (
     <div className="mx-auto max-w-lg px-5 py-24 text-center">
+      <SEO title="Order Placed" path="/order-success" noindex />
       <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-forest)]/10 text-3xl">
         🌿
       </div>

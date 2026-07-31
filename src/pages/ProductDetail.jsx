@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { useProducts } from "../context/ProductsContext";
 import { useCart } from "../context/CartContext";
 import { SheetsAPI } from "../lib/sheets";
+import SEO, { SITE_URL } from "../components/SEO";
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -17,7 +18,7 @@ export default function ProductDetail() {
 
   if (!product) {
     if (loading) {
-      return <div className="mx-auto max-w-6xl px-5 py-24 text-center text-[var(--color-charcoal)]/50">Loading…</div>;
+      return <div className="mx-auto max-w-[1440px] px-5 py-24 text-center text-[var(--color-charcoal)]/50">Loading…</div>;
     }
     return <Navigate to="/products" replace />;
   }
@@ -42,8 +43,35 @@ export default function ProductDetail() {
     setNotified(true);
   };
 
+  const productJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: product.shortDescription || product.description,
+    image: `${SITE_URL}${product.image}`,
+    brand: { "@type": "Brand", name: "neobonn" },
+    offers: product.comingSoon
+      ? undefined
+      : {
+          "@type": "Offer",
+          url: `${SITE_URL}/products/${product.id}`,
+          priceCurrency: "INR",
+          price: product.price,
+          availability: outOfStock
+            ? "https://schema.org/OutOfStock"
+            : "https://schema.org/InStock",
+        },
+  };
+
   return (
-    <div className="mx-auto max-w-6xl px-5 py-16 md:px-8">
+    <div className="mx-auto max-w-[1440px] px-5 py-16 md:px-8">
+      <SEO
+        title={product.seoTitle || product.name}
+        description={product.shortDescription || product.description}
+        path={`/products/${product.id}`}
+        image={`${SITE_URL}${product.image}`}
+        jsonLd={productJsonLd}
+      />
       <nav className="mb-8 text-sm text-[var(--color-charcoal)]/50">
         <Link to="/products" className="hover:text-[var(--color-forest-dark)]">Shop</Link> / {product.name}
       </nav>

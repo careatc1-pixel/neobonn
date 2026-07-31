@@ -8,6 +8,7 @@ export const products = [
   {
     id: "instant-brightening-milk-serum",
     name: "Instant Brightening Milk Serum",
+    seoTitle: "Milk Serum for Glowing & Even-Toned Skin",
     tagline: "Discover the Power of Luminous, Even-Toned Skin",
     category: "Face",
     price: 599,
@@ -34,6 +35,7 @@ export const products = [
   {
     id: "hydrating-cleanser",
     name: "Hydrating Cleanser",
+    seoTitle: "Hydrating Face Cleanser for Sensitive Skin",
     tagline: "Gentle daily cleanse, without stripping moisture",
     category: "Face",
     price: 399,
@@ -60,6 +62,7 @@ export const products = [
   {
     id: "radiance-serum",
     name: "Radiance Serum",
+    seoTitle: "Niacinamide Face Serum for Glowing Skin",
     tagline: "Unveiling Neobonn: Your Complete Wellness Journey",
     category: "Face",
     price: 649,
@@ -86,6 +89,7 @@ export const products = [
   {
     id: "peel-off-collagen-algine-face-mask",
     name: "Peel-Off Collagen & Algine Face Mask",
+    seoTitle: "Peel-Off Collagen Face Mask for Radiant Skin",
     tagline: "Mind, Body, Spirit — Hydration Balance",
     category: "Face",
     price: 549,
@@ -113,6 +117,7 @@ export const products = [
   {
     id: "neobonn-lip-balm",
     name: "Neobonn Lip Balm",
+    seoTitle: "Natural Lip Balm with Shea Butter & Beeswax",
     tagline: "Hydration · Protection · Natural Tint",
     category: "Face",
     price: 249,
@@ -139,6 +144,7 @@ export const products = [
   {
     id: "vitamin-c-face-serum",
     name: "Vitamin C Face Serum",
+    seoTitle: "Vitamin C Serum for Dark Spots & Pigmentation",
     tagline: "Brightening. Coming soon.",
     category: "Coming Soon",
     price: null,
@@ -161,6 +167,7 @@ export const products = [
   {
     id: "multani-mitti-soap",
     name: "Multani Mitti Soap",
+    seoTitle: "Multani Mitti Soap for Oily Skin",
     tagline: "Natural face & body soap",
     category: "Body",
     price: 249,
@@ -183,6 +190,7 @@ export const products = [
   {
     id: "aloevera-lemongrass-soap",
     name: "Aloevera & Lemongrass Soap",
+    seoTitle: "Aloe Vera Soap for Sensitive Skin",
     tagline: "Natural face & body soap",
     category: "Body",
     price: 249,
@@ -205,6 +213,7 @@ export const products = [
   {
     id: "charcoal-black-oud-soap",
     name: "Charcoal & Black Oud Soap",
+    seoTitle: "Activated Charcoal Soap for Oily Skin",
     tagline: "Natural face & body soap",
     category: "Body",
     price: 279,
@@ -227,6 +236,7 @@ export const products = [
   {
     id: "papaya-way-soap",
     name: "Papaya Way Soap",
+    seoTitle: "Papaya Soap for Skin Brightening",
     tagline: "Natural face & body soap",
     category: "Body",
     price: 249,
@@ -249,6 +259,7 @@ export const products = [
   {
     id: "neobonn-argan-hair-serum",
     name: "Neobonn Argan Hair Serum",
+    seoTitle: "Argan Oil Hair Serum for Frizz-Free Shine",
     tagline: "Silk-smooth shine, root to tip",
     category: "Hair",
     price: 449,
@@ -275,6 +286,7 @@ export const products = [
   {
     id: "neobonn-onion-biotin-hair-oil",
     name: "Neobonn Onion & Biotin Hair Oil",
+    seoTitle: "Onion & Biotin Hair Oil for Hair Fall Control",
     tagline: "Nourish, strengthen, revive",
     category: "Hair",
     price: 399,
@@ -301,6 +313,7 @@ export const products = [
   {
     id: "neobonn-calm-body-mist",
     name: "Neobonn Calm Body Mist",
+    seoTitle: "Lavender Body Mist for Relaxation",
     tagline: "A moment of stillness, bottled",
     category: "Wellness",
     price: 349,
@@ -327,6 +340,7 @@ export const products = [
   {
     id: "neobonn-herbal-detox-tea",
     name: "Neobonn Herbal Detox Tea",
+    seoTitle: "Herbal Detox Tea for Digestion",
     tagline: "Sip your way to balance",
     category: "Wellness",
     price: 299,

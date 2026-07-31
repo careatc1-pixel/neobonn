@@ -38,6 +38,7 @@ export const SheetsAPI = {
   sendOtp: (email, purpose) => callSheetsApi("sendOtp", { email, purpose }), // purpose: "login" | "reset"
   verifyOtpLogin: (email, otp) => callSheetsApi("verifyOtpLogin", { email, otp }),
   resetPasswordWithOtp: (data) => callSheetsApi("resetPasswordWithOtp", data), // {email, otp, newPassword}
+  loginWithGoogle: (credential) => callSheetsApi("googleLogin", { credential }), // credential = Google ID token (JWT)
 
   // ---- Enquiries sheet ----
   submitEnquiry: (data) => callSheetsApi("enquiry", data), // {name, email, phone, message}

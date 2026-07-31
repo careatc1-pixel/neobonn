@@ -15,7 +15,7 @@
  *    Orders       | OrderId | Items(JSON) | CustomerName | Email | Phone
  *                 | Address | City | Pincode | Amount | Status
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
- *    Products     | Id | Name | Tagline | Category | Price | ComingSoon
+ *    Products     | Id | Name | SeoTitle | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
  *
@@ -37,6 +37,10 @@
  * 3. Project Settings > Script Properties, add:
  *      RAZORPAY_KEY_ID       = rzp_live_xxxxx (or rzp_test_xxxxx)
  *      RAZORPAY_KEY_SECRET   = your_secret_key
+ *      GOOGLE_CLIENT_ID      = your OAuth Web client ID
+ *                              (same value as VITE_GOOGLE_CLIENT_ID in the
+ *                              frontend .env — needed for "Continue with
+ *                              Google" login to work)
  * 4. Deploy > New deployment > type "Web app".
  *      Execute as:  Me
  *      Who has access: Anyone
@@ -56,7 +60,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-07-29-inventory-v2";
+const CODE_VERSION = "2026-07-31-seo-title-v3";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -84,7 +88,7 @@ function doGet() {
 // a column by hand, or a CSV import ever shifts things. This is what
 // prevents "wrong column read as Stock" / "row silently dropped" bugs.
 const PRODUCT_COLUMNS = [
-  "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
+  "Id", "Name", "SeoTitle", "Tagline", "Category", "Price", "ComingSoon", "Image",
   "ShortDescription", "Description", "Ingredients(JSON)", "Specifications(JSON)", "Stock",
 ];
 
@@ -121,6 +125,7 @@ function rowToProductObject(row, colMap) {
   return {
     id,
     name: val("Name"),
+    seoTitle: val("SeoTitle"),
     tagline: val("Tagline"),
     category: val("Category"),
     price: val("Price") || null,
@@ -141,6 +146,7 @@ function productToRowArray(p, colMap) {
   };
   set("Id", p.id);
   set("Name", p.name);
+  set("SeoTitle", p.seoTitle);
   set("Tagline", p.tagline);
   set("Category", p.category);
   set("Price", p.price);
@@ -182,6 +188,8 @@ function doPost(e) {
         return jsonResponse(handleSendOtp(payload));
       case "verifyOtpLogin":
         return jsonResponse(handleVerifyOtpLogin(payload));
+      case "googleLogin":
+        return jsonResponse(handleGoogleLogin(payload));
       case "resetPasswordWithOtp":
         return jsonResponse(handleResetPasswordWithOtp(payload));
       case "enquiry":
@@ -283,6 +291,59 @@ function handleVerifyOtpLogin({ email, otp }) {
   if (!match) return { ok: false, message: "No account found with this email." };
 
   return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
+}
+
+// ---------------- Google Sign-In ----------------
+// Verifies the ID token (JWT) sent from the frontend's Google button by
+// asking Google's own tokeninfo endpoint to validate its signature and
+// return the decoded payload. This confirms the token is genuine and was
+// issued for OUR client ID (not spoofed), without needing any JWT
+// library. Requires a Script Property:
+//   GOOGLE_CLIENT_ID = <your OAuth Web client ID>.apps.googleusercontent.com
+// (same value as VITE_GOOGLE_CLIENT_ID in the frontend .env)
+
+function handleGoogleLogin({ credential }) {
+  if (!credential) return { ok: false, message: "Missing Google credential." };
+
+  const clientId = PropertiesService.getScriptProperties().getProperty("GOOGLE_CLIENT_ID");
+  if (!clientId) {
+    return { ok: false, message: "Google Sign-In is not configured yet. Add GOOGLE_CLIENT_ID in Script Properties." };
+  }
+
+  let payload;
+  try {
+    const res = UrlFetchApp.fetch(
+      "https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(credential),
+      { muteHttpExceptions: true }
+    );
+    payload = JSON.parse(res.getContentText());
+  } catch (err) {
+    return { ok: false, message: "Could not verify Google credential." };
+  }
+
+  if (!payload || payload.aud !== clientId) {
+    return { ok: false, message: "Google credential is invalid or was issued for a different app." };
+  }
+  if (payload.email_verified !== "true" && payload.email_verified !== true) {
+    return { ok: false, message: "This Google account's email is not verified." };
+  }
+
+  const email = payload.email;
+  const name = payload.name || email.split("@")[0];
+
+  const sheet = getSheet("Users");
+  const rows = sheet.getDataRange().getValues();
+  const match = rows.find((r) => r[1] === email);
+
+  if (match) {
+    return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
+  }
+
+  // First time signing in with Google — create an account automatically.
+  // Password column is left blank; this user can only sign in via Google
+  // or OTP unless they later set a password from "Forgot password".
+  sheet.appendRow([name, email, "", "", new Date()]);
+  return { ok: true, user: { name, email, phone: "" } };
 }
 
 function handleResetPasswordWithOtp({ email, otp, newPassword }) {

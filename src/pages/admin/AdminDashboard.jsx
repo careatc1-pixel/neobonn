@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Papa from "papaparse";
 import { products as defaultProducts } from "../../data/products";
 import { SheetsAPI } from "../../lib/sheets";
+import { ADMIN_LOGIN_PATH } from "../../App";
 
 const CSV_HEADER = [
   "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
@@ -104,7 +105,7 @@ export default function AdminDashboard() {
 
   const logout = () => {
     sessionStorage.removeItem("neobonn_admin");
-    navigate("/admin");
+    navigate(ADMIN_LOGIN_PATH);
   };
 
   const startNew = () => setEditing({ ...emptyProduct });

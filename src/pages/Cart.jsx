@@ -1,13 +1,16 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
+import SEO from "../components/SEO";
 
 export default function Cart() {
   const { items, updateQty, removeItem, subtotal } = useCart();
   const navigate = useNavigate();
+  const seoTag = <SEO title="Your Bag" path="/cart" noindex />;
 
   if (items.length === 0) {
     return (
       <div className="mx-auto max-w-2xl px-5 py-24 text-center">
+        {seoTag}
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">Your bag is empty</h1>
         <Link to="/products" className="mt-6 inline-block rounded-full bg-[var(--color-forest-dark)] px-8 py-3 text-sm font-semibold text-white">
           Continue Shopping
@@ -17,7 +20,8 @@ export default function Cart() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-16 md:px-8">
+    <div className="mx-auto max-w-[1120px] px-5 py-16 md:px-8">
+      {seoTag}
       <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">Your Bag</h1>
 
       <div className="mt-8 divide-y divide-[var(--color-forest)]/10">

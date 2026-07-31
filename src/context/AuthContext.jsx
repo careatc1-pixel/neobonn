@@ -58,6 +58,24 @@ export function AuthProvider({ children }) {
     return res;
   };
 
+  const loginWithGoogle = async (credential) => {
+    const res = await SheetsAPI.loginWithGoogle(credential);
+    if (res.demo) {
+      // Demo mode fallback: decode the Google JWT locally just to get a
+      // name/email so the site is usable before Sheets is wired up.
+      try {
+        const payload = JSON.parse(atob(credential.split(".")[1]));
+        const fake = { name: payload.name || payload.email.split("@")[0], email: payload.email };
+        persist(fake);
+        return { ok: true, demo: true };
+      } catch {
+        return { ok: false, message: "Could not read Google account details." };
+      }
+    }
+    if (res.ok) persist(res.user);
+    return res;
+  };
+
   const resetPassword = async (email, otp, newPassword) => {
     const res = await SheetsAPI.resetPasswordWithOtp({ email, otp, newPassword });
     if (res.demo) return { ok: true, demo: true };
@@ -67,7 +85,7 @@ export function AuthProvider({ children }) {
   const logout = () => persist(null);
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, requestOtp, loginWithOtp, resetPassword }}>
+    <AuthContext.Provider value={{ user, login, signup, logout, requestOtp, loginWithOtp, loginWithGoogle, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import SEO from "../components/SEO";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
 export default function Login() {
-  const { login, requestOtp, loginWithOtp } = useAuth();
+  const { login, requestOtp, loginWithOtp, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState("password"); // "password" | "otp"
+  const googleBtnRef = useRef(null);
+  const [googleError, setGoogleError] = useState("");
 
   const [form, setForm] = useState({ email: "", password: "" });
   const [otp, setOtp] = useState("");
@@ -49,11 +54,65 @@ export default function Login() {
     else setError(res.message || "Invalid or expired code.");
   };
 
+  const handleGoogleCredential = async (response) => {
+    setGoogleError("");
+    const res = await loginWithGoogle(response.credential);
+    if (res.ok) navigate("/account");
+    else setGoogleError(res.message || "Google sign-in failed. Please try again.");
+  };
+
+  // Load the Google Identity Services button once the script (loaded in
+  // index.html) is ready. Skipped gracefully if no client ID is set.
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+
+    let cancelled = false;
+    const renderButton = () => {
+      if (cancelled || !window.google?.accounts?.id || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential,
+      });
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: "outline",
+        size: "large",
+        width: 320,
+        text: "continue_with",
+      });
+    };
+
+    if (window.google?.accounts?.id) {
+      renderButton();
+    } else {
+      const interval = setInterval(() => {
+        if (window.google?.accounts?.id) {
+          clearInterval(interval);
+          renderButton();
+        }
+      }, 200);
+      return () => { cancelled = true; clearInterval(interval); };
+    }
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-5 py-16">
+      <SEO title="Login" path="/login/customer" noindex />
       <h1 className="text-center font-display text-3xl text-[var(--color-forest-dark)]">
         Welcome Back
       </h1>
+
+      {GOOGLE_CLIENT_ID && (
+        <div className="mt-8 flex flex-col items-center">
+          <div ref={googleBtnRef} />
+          {googleError && <p className="mt-2 text-sm text-red-600">{googleError}</p>}
+          <div className="mt-6 flex w-full items-center gap-3">
+            <span className="h-px flex-1 bg-[var(--color-forest)]/15" />
+            <span className="text-xs uppercase tracking-wide text-[var(--color-charcoal)]/50">or</span>
+            <span className="h-px flex-1 bg-[var(--color-forest)]/15" />
+          </div>
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div className="mx-auto mt-6 flex rounded-full border border-[var(--color-forest)]/20 p-1 text-sm">

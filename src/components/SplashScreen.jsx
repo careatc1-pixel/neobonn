@@ -55,8 +55,8 @@ export default function SplashScreen({ onFinish }) {
             stage >= 3 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3"
           }`}
         >
-          <h1 className="font-display text-3xl tracking-wide text-[var(--color-forest-dark)]">
-            neobonn
+          <h1 className="font-display text-3xl tracking-wide">
+            <span className="text-[var(--color-forest-dark)]">neo</span><span className="text-[var(--color-gold)]">bonn</span>
           </h1>
           <p className="mt-1 whitespace-nowrap text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold)]">
             {COMPANY.tagline}

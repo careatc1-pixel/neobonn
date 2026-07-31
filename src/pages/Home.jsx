@@ -6,12 +6,30 @@ import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
 import SaleHeroBanner from "../components/SaleHeroBanner";
 import CategoryStrip from "../components/CategoryStrip";
+import SEO, { SITE_URL } from "../components/SEO";
 
 const heroSlides = posterSlides.filter((s) => s.id !== "brand-banner");
+
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "neobonn",
+  url: SITE_URL,
+  logo: `${SITE_URL}/logo.png`,
+  description:
+    "neobonn is a skin care & wellness brand crafting handmade soaps, serums, and rituals from natural botanicals.",
+};
 
 export default function Home() {
   return (
     <div>
+      <SEO
+        title="Natural Skin Care & Wellness Products"
+        description="Handcrafted soaps, brightening serums, face masks & lip balm made with natural botanicals like aloe vera, multani mitti, and white water lily. Dermatologically approved, cruelty-free."
+        path="/"
+        jsonLd={organizationJsonLd}
+      />
+
       {/* Sale hero banner (new) */}
       <SaleHeroBanner />
 
@@ -20,7 +38,7 @@ export default function Home() {
 
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pb-20 pt-16 md:px-8 md:pt-24">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 md:grid-cols-2">
+        <div className="mx-auto grid max-w-[1600px] items-center gap-12 md:grid-cols-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
               Atharv Luxe Co. presents
@@ -55,6 +73,9 @@ export default function Home() {
             <video
               className="relative w-full max-w-md rounded-2xl md:max-w-lg"
               src="/videos/hero-logo.mp4"
+              width="640"
+              height="360"
+              preload="auto"
               autoPlay
               loop
               muted
@@ -75,7 +96,7 @@ export default function Home() {
 
       {/* Trust strip */}
       <section className="border-y border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] px-5 py-8 md:px-8">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 text-center sm:grid-cols-3">
+        <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-6 text-center sm:grid-cols-3">
           {[
             { icon: Leaf, label: "100% Natural Ingredients" },
             { icon: ShieldCheck, label: "Dermatologically Mindful" },
@@ -90,7 +111,7 @@ export default function Home() {
       </section>
 
       {/* Products */}
-      <section className="mx-auto max-w-7xl px-5 py-20 md:px-8">
+      <section className="mx-auto max-w-[1600px] px-5 py-20 md:px-8">
         <div className="mb-10 flex items-end justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
