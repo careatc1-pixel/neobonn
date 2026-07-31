@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
 import { User, ShieldCheck } from "lucide-react";
+import SEO from "../components/SEO";
 
 export default function LoginChoice() {
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-3xl flex-col justify-center px-5 py-16">
+      <SEO title="Sign In" path="/login" noindex />
       <div className="text-center">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold)]">
           Welcome
