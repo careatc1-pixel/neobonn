@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import SplashScreen from "./components/SplashScreen";
 import PromoBanner from "./components/PromoBanner";
 import Navbar from "./components/Navbar";
@@ -32,6 +32,16 @@ import RequireAdmin from "./pages/admin/RequireAdmin";
 export const ADMIN_LOGIN_PATH = "/nb-team-portal-2026";
 
 export default function App() {
+  const location = useLocation();
+  // Admin pages are a separate, standalone area — they must never show the
+  // storefront's Navbar/Footer, since that navbar reflects the *customer*
+  // login (AuthContext), not the admin session. Rendering it there caused
+  // whatever customer account happened to be logged in on that browser
+  // (e.g. "Nikunj") to appear at the top of the admin dashboard, which has
+  // nothing to do with admin access.
+  const isAdminRoute =
+    location.pathname === ADMIN_LOGIN_PATH || location.pathname.startsWith("/admin");
+
   // Splash plays once per browser session (not on every internal route change)
   const [showSplash, setShowSplash] = useState(
     () => !sessionStorage.getItem("neobonn_splash_seen")
@@ -42,8 +52,26 @@ export default function App() {
     setShowSplash(false);
   };
 
-  if (showSplash) {
+  if (showSplash && !isAdminRoute) {
     return <SplashScreen onFinish={finishSplash} />;
+  }
+
+  if (isAdminRoute) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Routes>
+          <Route path={ADMIN_LOGIN_PATH} element={<AdminLogin />} />
+          <Route
+            path="/admin/dashboard"
+            element={
+              <RequireAdmin>
+                <AdminDashboard />
+              </RequireAdmin>
+            }
+          />
+        </Routes>
+      </div>
+    );
   }
 
   return (
@@ -70,23 +98,6 @@ export default function App() {
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/refund-policy" element={<RefundPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />
-
-          {/*
-            Admin login is intentionally NOT linked from anywhere in the
-            UI (no navbar/footer link, no /login choice screen). The only
-            way in is by typing this exact URL directly in the browser.
-            Change ADMIN_LOGIN_PATH below any time you want a new secret
-            URL — just remember to update it here.
-          */}
-          <Route path={ADMIN_LOGIN_PATH} element={<AdminLogin />} />
-          <Route
-            path="/admin/dashboard"
-            element={
-              <RequireAdmin>
-                <AdminDashboard />
-              </RequireAdmin>
-            }
-          />
         </Routes>
       </main>
       <Footer />
