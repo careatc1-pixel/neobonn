@@ -17,17 +17,25 @@
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
  *                 | TrackingStatus | Carrier | TrackingNumber
  *                 | TrackingHistory(JSON)
+ *                 | OrderPlacedAt | ConfirmedAt | ShippedAt
+ *                 | OutForDeliveryAt | DeliveredAt | CancelledAt
  *
- *    NOTE ON SHIPMENT TRACKING: "Status" (column J) is the PAYMENT status
- *    (Pending/Paid). "TrackingStatus" (column N) is the SHIPMENT status
- *    the admin panel moves an order through: Order Placed -> Confirmed ->
- *    Shipped -> Out for Delivery -> Delivered (or Cancelled). Every change
- *    is appended to "TrackingHistory(JSON)" as {status, note, at} so the
- *    customer-facing tracking page can show a full timeline. If you're
- *    adding these columns to an existing sheet, just add the 4 new
- *    headers after CreatedAt — existing rows are read by fixed column
- *    position (see handlePlaceOrder/handleGetMyOrders) so append, don't
- *    insert, these columns.
+ *    NOTE ON SHIPMENT TRACKING (Amazon-style, one column per stage):
+ *    "Status" (column J) is the PAYMENT status (Pending/Paid).
+ *    "TrackingStatus" (column N) is just the CURRENT shipment stage name,
+ *    for a quick glance. The actual source of truth is the 6 dedicated
+ *    date columns at the end (OrderPlacedAt ... CancelledAt) — each one
+ *    gets a timestamp exactly ONCE, the first time an order reaches that
+ *    stage. Re-saving the same stage again in the admin panel is a no-op
+ *    (idempotent): it will NOT overwrite that column's timestamp and
+ *    will NOT send a duplicate email. "TrackingHistory(JSON)" is kept
+ *    only as a lightweight internal note log for the customer-facing
+ *    timeline UI — you never need to read or edit it by hand; everything
+ *    you'd want to see is in the plain date columns.
+ *    If you're adding these columns to an existing sheet, add them in
+ *    this exact order after CreatedAt — existing rows are read by fixed
+ *    column position (see handlePlaceOrder/handleGetMyOrders) so append,
+ *    don't insert, these columns.
  *    Products     | Id | Name | SeoTitle | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
@@ -73,7 +81,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-01-order-emails-v1";
+const CODE_VERSION = "2026-08-01-order-emails-v2-idempotent";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -256,7 +264,7 @@ function formatOrderItemsPlain(items) {
 // Sent once, right after payment is confirmed.
 function sendOrderConfirmationEmail(order) {
   try {
-    if (!order || !order.email) return;
+    if (!order || !order.email) return { ok: false, error: "No email on order." };
     const subject = `Order confirmed — ${order.orderId} | neobonn`;
     const body =
       `Hi ${order.customerName || "there"},\n\n` +
@@ -268,15 +276,17 @@ function sendOrderConfirmationEmail(order) {
       `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}\n\n` +
       `— Team neobonn`;
     MailApp.sendEmail(order.email, subject, body);
+    return { ok: true };
   } catch (err) {
     console.error("sendOrderConfirmationEmail failed: " + err.message);
+    return { ok: false, error: err.message };
   }
 }
 
 // Sent every time an admin moves an order to a new shipment stage.
 function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
   try {
-    if (!order || !order.email) return;
+    if (!order || !order.email) return { ok: false, error: "No email on order." };
     const subject = `Order ${order.orderId} — ${status} | neobonn`;
     const lines = [
       `Hi ${order.customerName || "there"},`,
@@ -297,9 +307,34 @@ function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
       `— Team neobonn`
     );
     MailApp.sendEmail(order.email, subject, lines.join("\n"));
+    return { ok: true };
   } catch (err) {
     console.error("sendOrderStatusEmail failed: " + err.message);
+    return { ok: false, error: err.message };
   }
+}
+
+// ---- One-time setup helper — RUN THIS MANUALLY ONCE FROM THE EDITOR ----
+// The #1 reason order emails silently never arrive: MailApp has never
+// been authorized for this script. Apps Script only asks for that
+// permission the first time a function using MailApp actually *runs*
+// inside the editor (not via the deployed Web App — Web App calls fail
+// silently if authorization was never granted).
+//
+// HOW TO USE: Apps Script editor → function dropdown (top, next to Debug)
+// → select "testEmailSetup" → click Run (▶). The first time, Google will
+// show a permission screen — click "Advanced" → "Go to (project name),
+// unsafe" → "Allow". Then check the inbox of your OWN Google account
+// (the one that owns this Apps Script project / deployment) for a test
+// email. Once that arrives, order emails will start working too.
+function testEmailSetup() {
+  const to = Session.getEffectiveUser().getEmail();
+  MailApp.sendEmail(
+    to,
+    "neobonn: email setup test ✅",
+    "If you're reading this, MailApp is authorized on this script and order confirmation / shipment status emails will now work."
+  );
+  return "Test email sent to: " + to;
 }
 
 function handleSignup({ name, email, phone, password }) {
@@ -508,6 +543,7 @@ function handlePlaceOrder({ items, customer, amount }) {
     const initialHistory = [
       { status: "Order Placed", note: "We've received your order.", at: new Date().toISOString() },
     ];
+    const now = new Date();
 
     getSheet("Orders").appendRow([
       orderId,
@@ -522,11 +558,17 @@ function handlePlaceOrder({ items, customer, amount }) {
       "Pending",
       rzpOrder.id || "",
       "",
-      new Date(),
+      now, // CreatedAt
       "Order Placed", // TrackingStatus
       "", // Carrier
       "", // TrackingNumber
-      JSON.stringify(initialHistory), // TrackingHistory(JSON)
+      JSON.stringify(initialHistory), // TrackingHistory(JSON) — internal note log only
+      now, // OrderPlacedAt
+      "", // ConfirmedAt
+      "", // ShippedAt
+      "", // OutForDeliveryAt
+      "", // DeliveredAt
+      "", // CancelledAt
     ]);
 
     return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
@@ -609,7 +651,7 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
         if (!alreadyPaid) {
           const items = safeParse(rows[i][1], []); // Items(JSON) column
           deductStock(items);
-          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 17).getValues()[0]);
+          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 23).getValues()[0]);
         }
         break;
       }
@@ -626,8 +668,27 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   return { ok: true };
 }
 
+// Maps a shipment status name to which column holds its "reached at"
+// timestamp. This is the single source of truth for stage progression —
+// each column is written exactly once (see handleUpdateOrderStatus).
+const STAGE_COLUMNS = {
+  "Order Placed": 18, // R
+  Confirmed: 19, // S
+  Shipped: 20, // T
+  "Out for Delivery": 21, // U
+  Delivered: 22, // V
+  Cancelled: 23, // W
+};
+const TRACKING_STAGES = ["Order Placed", "Confirmed", "Shipped", "Out for Delivery", "Delivered"];
+
 // Shared: turns one Orders sheet row into the object the frontend uses.
 function rowToOrderObject(r) {
+  const stageTimestamps = {};
+  Object.keys(STAGE_COLUMNS).forEach((stage) => {
+    const val = r[STAGE_COLUMNS[stage] - 1]; // convert 1-based column -> 0-based array index
+    if (val) stageTimestamps[stage] = val;
+  });
+
   return {
     orderId: r[0],
     items: safeParse(r[1], []),
@@ -643,7 +704,10 @@ function rowToOrderObject(r) {
     trackingStatus: r[13] || "Order Placed",
     carrier: r[14] || "",
     trackingNumber: r[15] || "",
-    trackingHistory: safeParse(r[16], []),
+    trackingHistory: safeParse(r[16], []), // internal note log, for the timeline UI only
+    // Clean, Amazon-style per-stage timestamps — e.g. stageTimestamps.Shipped
+    // is either an ISO date string or absent if not reached yet.
+    stageTimestamps,
   };
 }
 
@@ -699,45 +763,92 @@ function handleListAllOrders() {
   return { ok: true, orders };
 }
 
-const TRACKING_STAGES = ["Order Placed", "Confirmed", "Shipped", "Out for Delivery", "Delivered"];
-
-// Admin: moves an order to a new shipment stage (or "Cancelled"), records
-// an optional courier + tracking number, and appends a timestamped entry
-// to TrackingHistory(JSON) so the customer sees a full timeline, not just
-// the current status.
+// Admin: moves an order to a new shipment stage (or "Cancelled").
+//
+// PROFESSIONAL / AMAZON-STYLE BEHAVIOUR:
+// - Each stage (Order Placed, Confirmed, Shipped, Out for Delivery,
+//   Delivered, Cancelled) has its own dedicated date column. That column
+//   is written EXACTLY ONCE — the first time the order reaches that
+//   stage. Saving the same stage again is a safe no-op: nothing is
+//   overwritten, no duplicate email is sent, no duplicate log entry is
+//   added.
+// - Once an order is Cancelled, no further status changes are allowed.
+// - Carrier / tracking number can still be added or corrected on top of
+//   an already-reached stage (e.g. tracking number arrives a day after
+//   "Shipped" was set) — that alone still counts as a real update and
+//   still notifies the customer, without touching the stage timestamp.
 function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumber }) {
   if (!orderId || !status) return { ok: false, message: "orderId and status are required." };
-  if (TRACKING_STAGES.indexOf(status) === -1 && status !== "Cancelled") {
+  if (!STAGE_COLUMNS[status]) {
     return { ok: false, message: "Unknown status: " + status };
   }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   let updatedOrder = null;
+  let isMeaningfulChange = false;
   try {
     const sheet = getSheet("Orders");
     const rows = sheet.getDataRange().getValues();
     const rowIndex = rows.findIndex((r, i) => i > 0 && r[0] === orderId);
     if (rowIndex === -1) return { ok: false, message: "Order not found." };
 
-    const history = safeParse(rows[rowIndex][16], []);
-    history.push({ status, note: note || "", at: new Date().toISOString() });
+    const row = rows[rowIndex];
+    if (row[STAGE_COLUMNS["Cancelled"] - 1]) {
+      return { ok: false, message: "This order is already cancelled — no further status changes are allowed." };
+    }
 
-    sheet.getRange(rowIndex + 1, 14).setValue(status); // TrackingStatus
+    const stageCol = STAGE_COLUMNS[status];
+    const stageAlreadyReached = !!row[stageCol - 1];
+    const currentCarrier = row[14] || "";
+    const currentTrackingNumber = row[15] || "";
+    const carrierChanged = carrier !== undefined && carrier !== currentCarrier;
+    const trackingNumberChanged = trackingNumber !== undefined && trackingNumber !== currentTrackingNumber;
+
+    isMeaningfulChange = !stageAlreadyReached || carrierChanged || trackingNumberChanged;
+
+    if (!isMeaningfulChange) {
+      // Nothing actually changed — same status re-saved with the same
+      // carrier/tracking number. Return the order as-is, no writes at all.
+      return {
+        ok: true,
+        order: rowToOrderObject(row),
+        skipped: true,
+        message: `Order is already marked "${status}" — no changes made.`,
+      };
+    }
+
+    if (!stageAlreadyReached) {
+      sheet.getRange(rowIndex + 1, stageCol).setValue(new Date()); // e.g. ShippedAt
+      sheet.getRange(rowIndex + 1, 14).setValue(status); // TrackingStatus — current stage
+    }
     if (carrier !== undefined) sheet.getRange(rowIndex + 1, 15).setValue(carrier);
     if (trackingNumber !== undefined) sheet.getRange(rowIndex + 1, 16).setValue(trackingNumber);
-    sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history)); // TrackingHistory(JSON)
 
-    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 17).getValues()[0]);
+    // Internal note log (for the customer-facing timeline UI only — not
+    // something you need to read directly in the sheet).
+    const history = safeParse(row[16], []);
+    history.push({ status, note: note || "", at: new Date().toISOString() });
+    sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history));
+
+    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 23).getValues()[0]);
   } finally {
     lock.releaseLock();
   }
 
   // Email the customer outside the lock, so a slow/failed send never
-  // blocks other admin actions.
-  sendOrderStatusEmail(updatedOrder, status, note, carrier, trackingNumber);
+  // blocks other admin actions. Only for a real change (see above).
+  let emailResult = { ok: true, skipped: true };
+  if (isMeaningfulChange) {
+    emailResult = sendOrderStatusEmail(updatedOrder, status, note, carrier, trackingNumber);
+  }
 
-  return { ok: true, order: updatedOrder };
+  return {
+    ok: true,
+    order: updatedOrder,
+    emailSent: !!emailResult.ok && !emailResult.skipped,
+    emailError: emailResult.ok ? null : emailResult.error,
+  };
 }
 
 // ---------------- Products (Admin Panel) ----------------

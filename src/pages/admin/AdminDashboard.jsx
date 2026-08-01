@@ -171,6 +171,15 @@ export default function AdminDashboard() {
           delete next[order.orderId];
           return next;
         });
+        if (res.skipped) {
+          alert(res.message); // e.g. "Order is already marked \"Shipped\" — no changes made."
+        } else if (res.emailError) {
+          alert(
+            `Status updated, but the notification email failed to send.\n\n` +
+              `Reason: ${res.emailError}\n\n` +
+              `Tip: open Apps Script → run "testEmailSetup" once from the editor to authorize email sending (see CHANGES.md).`
+          );
+        }
       } else {
         alert(res.message || "Couldn't update this order. Please try again.");
       }
@@ -553,6 +562,7 @@ export default function AdminDashboard() {
                       <OrderTimeline
                         trackingStatus={order.trackingStatus}
                         trackingHistory={order.trackingHistory}
+                        stageTimestamps={order.stageTimestamps}
                         carrier={order.carrier}
                         trackingNumber={order.trackingNumber}
                       />

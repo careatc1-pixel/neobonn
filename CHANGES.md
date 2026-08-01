@@ -71,5 +71,64 @@ in India is usually an SMS DLT-registered route (a few paise per SMS) or
 the WhatsApp Business API — happy to wire that in whenever you're ready
 to take on that cost.
 
-No manual sheet changes are needed for this — it uses the same Orders
-sheet/columns from step 2 above. Just redeploy the updated `Code.gs`.
+## 4. Redesigned: shipment tracking is now Amazon-style & bug-free
+
+### What was wrong
+- Saving the same status twice added a duplicate entry to a hidden JSON
+  blob — confusing, and looked like "data overwriting."
+- Order-confirmation and status-update emails could fail silently (e.g.
+  if Gmail sending was never authorized for this script) with zero
+  feedback to you.
+
+### What changed
+Each shipment stage now has its **own plain date column** in the Orders
+sheet — nothing hidden in JSON, nothing to decode:
+
+```
+R: OrderPlacedAt
+S: ConfirmedAt
+T: ShippedAt
+U: OutForDeliveryAt
+V: DeliveredAt
+W: CancelledAt
+```
+
+Add these 6 new headers to the **Orders** sheet, right after the
+`TrackingHistory(JSON)` column (Q) you added earlier.
+
+**Behaviour (matches Amazon/major e-commerce platforms):**
+- Each column is filled in **exactly once** — the first time the order
+  reaches that stage. Clicking "Save update" again with the same status
+  does nothing (no overwrite, no duplicate email) — you'll just see a
+  message: *"Order is already marked 'X' — no changes made."*
+- Adding/correcting the courier or tracking number still counts as a
+  real update and still emails the customer, even if the stage itself
+  was already reached.
+- Once an order is **Cancelled**, no further status changes are allowed
+  on it.
+- You can see the full order history at a glance directly in the sheet —
+  just look across the 6 date columns.
+
+### Fix: order/status emails not sending
+The #1 reason emails silently never arrive: Gmail sending was never
+**authorized** for this script (this only happens once, and only from
+inside the Apps Script editor — the deployed Web App can't trigger it).
+
+**Run this once:**
+1. Apps Script editor → function dropdown (top toolbar, next to Debug)
+   → select **`testEmailSetup`**.
+2. Click **Run (▶)**.
+3. The first time, Google shows a permission screen → click **Advanced**
+   → **"Go to (project name), unsafe"** → **Allow**.
+4. Check the inbox of the Google account that owns this Apps Script
+   project — you should get a test email within a minute.
+
+Once that test email arrives, order confirmation + every status update
+email will start working automatically. If an email ever does fail
+after this (e.g. daily quota reached), the admin dashboard now tells you
+exactly why right after you click "Save update" — instead of failing
+silently.
+
+No existing order data is lost or changed by this update — the new
+columns are simply blank for older orders until you next update their
+status.

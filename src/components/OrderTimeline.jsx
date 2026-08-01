@@ -26,7 +26,7 @@ function formatDate(iso) {
 // Confirmed -> Shipped -> Out for Delivery -> Delivered), plus the full
 // timestamped history underneath. Handles the "Cancelled" terminal state
 // separately since it isn't part of the normal forward progression.
-export default function OrderTimeline({ trackingStatus, trackingHistory = [], carrier, trackingNumber }) {
+export default function OrderTimeline({ trackingStatus, trackingHistory = [], stageTimestamps = {}, carrier, trackingNumber }) {
   const isCancelled = trackingStatus === "Cancelled";
   const currentIndex = TRACKING_STAGES.indexOf(trackingStatus);
 
@@ -34,7 +34,8 @@ export default function OrderTimeline({ trackingStatus, trackingHistory = [], ca
     <div>
       {isCancelled ? (
         <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-          <X size={16} /> This order was cancelled.
+          <X size={16} />
+          Cancelled{stageTimestamps.Cancelled ? ` on ${formatDate(stageTimestamps.Cancelled)}` : ""}
         </div>
       ) : (
         <div className="flex items-start">
@@ -69,6 +70,11 @@ export default function OrderTimeline({ trackingStatus, trackingHistory = [], ca
                 >
                   {stage}
                 </p>
+                {stageTimestamps[stage] && (
+                  <p className="mt-0.5 text-[10px] leading-tight text-[var(--color-charcoal)]/45">
+                    {formatDate(stageTimestamps[stage])}
+                  </p>
+                )}
               </div>
             );
           })}

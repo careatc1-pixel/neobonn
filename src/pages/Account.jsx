@@ -164,6 +164,7 @@ export default function Account() {
                     <OrderTimeline
                       trackingStatus={order.trackingStatus}
                       trackingHistory={order.trackingHistory}
+                      stageTimestamps={order.stageTimestamps}
                       carrier={order.carrier}
                       trackingNumber={order.trackingNumber}
                     />
