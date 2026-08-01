@@ -20,14 +20,42 @@ async function callSheetsApi(action, payload = {}) {
     return { ok: false, demo: true };
   }
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    // Apps Script Web Apps require text/plain to avoid CORS preflight
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, payload }),
-  });
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: "POST",
+      // Apps Script Web Apps require text/plain to avoid CORS preflight
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload }),
+    });
+  } catch (err) {
+    // Network-level failure (DNS, CORS block, offline, wrong domain) —
+    // never even reached the server, so there's no status code at all.
+    throw new Error(
+      `Could not reach the order backend for "${action}" (network error: ${err.message}). ` +
+        `Check that VITE_SHEETS_API_URL is set correctly and the Apps Script deployment is live.`
+    );
+  }
 
-  if (!res.ok) throw new Error(`Sheets API error: ${res.status}`);
+  if (!res.ok) {
+    // Include a snippet of the actual response body — this is usually
+    // the single most useful clue (e.g. Google's own "Page not found"
+    // HTML for a bad/expired deployment URL, vs. a real error from our
+    // Code.gs). Shown right in the on-screen error, no DevTools needed.
+    let bodySnippet = "";
+    try {
+      bodySnippet = (await res.text()).replace(/\s+/g, " ").trim().slice(0, 200);
+    } catch {
+      // ignore — body may not be readable
+    }
+    throw new Error(
+      `Sheets API error: ${res.status} ${res.statusText} while calling "${action}". ` +
+        `URL used: ${API_URL} — ` +
+        `this usually means VITE_SHEETS_API_URL points to an old/invalid Apps Script deployment, ` +
+        `or the env var wasn't applied to this build.` +
+        (bodySnippet ? ` Server said: "${bodySnippet}"` : "")
+    );
+  }
   return res.json();
 }
 
