@@ -45,18 +45,28 @@ export default function Account() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
+  const [loadErr, setLoadErr] = useState("");
   const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
     if (!user?.email) return;
     (async () => {
-      const res = await SheetsAPI.getMyOrders(user.email);
-      if (res.demo) {
-        setDemoMode(true);
-      } else if (res.ok) {
-        setOrders(res.orders);
+      setLoading(true);
+      setLoadErr("");
+      try {
+        const res = await SheetsAPI.getMyOrders(user.email);
+        if (res.demo) {
+          setDemoMode(true);
+        } else if (res.ok) {
+          setOrders(res.orders);
+        } else {
+          setLoadErr(res.message || "Couldn't load your orders.");
+        }
+      } catch (err) {
+        setLoadErr(err.message || "Couldn't load your orders.");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     })();
   }, [user]);
 
@@ -94,7 +104,13 @@ export default function Account() {
           <p className="mt-4 text-sm text-[var(--color-charcoal)]/50">Loading your orders...</p>
         )}
 
-        {!demoMode && !loading && orders.length === 0 && (
+        {!demoMode && loadErr && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadErr}
+          </div>
+        )}
+
+        {!demoMode && !loading && !loadErr && orders.length === 0 && (
           <div className="mt-6 flex flex-col items-center rounded-2xl border border-dashed border-[var(--color-forest)]/20 py-12 text-center">
             <Package className="text-[var(--color-forest)]/40" size={32} />
             <p className="mt-3 text-sm text-[var(--color-charcoal)]/60">

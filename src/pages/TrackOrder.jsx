@@ -20,15 +20,20 @@ export default function TrackOrder() {
     setLoading(true);
     setError("");
     setOrder(null);
-    const res = await SheetsAPI.trackOrder({ orderId: orderId.trim(), email: email.trim() });
-    if (res.demo) {
-      setDemoMode(true);
-    } else if (res.ok) {
-      setOrder(res.order);
-    } else {
-      setError(res.message || "Couldn't find that order.");
+    try {
+      const res = await SheetsAPI.trackOrder({ orderId: orderId.trim(), email: email.trim() });
+      if (res.demo) {
+        setDemoMode(true);
+      } else if (res.ok) {
+        setOrder(res.order);
+      } else {
+        setError(res.message || "Couldn't find that order.");
+      }
+    } catch (err) {
+      setError(err.message || "Couldn't find that order.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Auto-run the lookup if both fields arrived pre-filled via the URL

@@ -99,30 +99,43 @@ export default function AdminDashboard() {
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersDemoMode, setOrdersDemoMode] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderDrafts, setOrderDrafts] = useState({}); // { [orderId]: { status, carrier, trackingNumber, note } }
   const [orderSavingId, setOrderSavingId] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const res = await SheetsAPI.listProducts();
-      if (res.demo) {
-        setDemoMode(true);
-        return; // fall back to local defaultProducts already in state
+      try {
+        const res = await SheetsAPI.listProducts();
+        if (res.demo) {
+          setDemoMode(true);
+          return; // fall back to local defaultProducts already in state
+        }
+        if (res.ok) setList(res.products);
+      } catch (err) {
+        console.error("[admin] Failed to load products:", err);
       }
-      if (res.ok) setList(res.products);
     })();
   }, []);
 
   const loadOrders = async () => {
     setOrdersLoading(true);
-    const res = await SheetsAPI.listAllOrders();
-    if (res.demo) {
-      setOrdersDemoMode(true);
-    } else if (res.ok) {
-      setOrders(res.orders);
+    setOrdersError("");
+    try {
+      const res = await SheetsAPI.listAllOrders();
+      if (res.demo) {
+        setOrdersDemoMode(true);
+      } else if (res.ok) {
+        setOrders(res.orders);
+      } else {
+        setOrdersError(res.message || "Couldn't load orders.");
+      }
+    } catch (err) {
+      setOrdersError(err.message || "Couldn't load orders.");
+    } finally {
+      setOrdersLoading(false);
     }
-    setOrdersLoading(false);
   };
 
   useEffect(() => {
@@ -143,24 +156,29 @@ export default function AdminDashboard() {
   const saveOrderStatus = async (order) => {
     const draft = draftFor(order);
     setOrderSavingId(order.orderId);
-    const res = await SheetsAPI.updateOrderStatus({
-      orderId: order.orderId,
-      status: draft.status,
-      carrier: draft.carrier,
-      trackingNumber: draft.trackingNumber,
-      note: draft.note,
-    });
-    if (res.ok) {
-      setOrders((prev) => prev.map((o) => (o.orderId === order.orderId ? res.order : o)));
-      setOrderDrafts((prev) => {
-        const next = { ...prev };
-        delete next[order.orderId];
-        return next;
+    try {
+      const res = await SheetsAPI.updateOrderStatus({
+        orderId: order.orderId,
+        status: draft.status,
+        carrier: draft.carrier,
+        trackingNumber: draft.trackingNumber,
+        note: draft.note,
       });
-    } else {
-      alert(res.message || "Couldn't update this order. Please try again.");
+      if (res.ok) {
+        setOrders((prev) => prev.map((o) => (o.orderId === order.orderId ? res.order : o)));
+        setOrderDrafts((prev) => {
+          const next = { ...prev };
+          delete next[order.orderId];
+          return next;
+        });
+      } else {
+        alert(res.message || "Couldn't update this order. Please try again.");
+      }
+    } catch (err) {
+      alert(err.message || "Couldn't update this order. Please try again.");
+    } finally {
+      setOrderSavingId(null);
     }
-    setOrderSavingId(null);
   };
 
   const logout = () => {
@@ -466,11 +484,20 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {!ordersDemoMode && ordersLoading && (
+          {!ordersDemoMode && ordersError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {ordersError}
+              <button onClick={loadOrders} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!ordersDemoMode && !ordersError && ordersLoading && (
             <p className="text-sm text-[var(--color-charcoal)]/50">Loading orders...</p>
           )}
 
-          {!ordersDemoMode && !ordersLoading && orders.length === 0 && (
+          {!ordersDemoMode && !ordersError && !ordersLoading && orders.length === 0 && (
             <p className="text-sm text-[var(--color-charcoal)]/50">No orders yet.</p>
           )}
 
