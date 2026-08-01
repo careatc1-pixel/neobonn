@@ -73,7 +73,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-01-order-tracking-v1";
+const CODE_VERSION = "2026-08-01-order-emails-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -238,6 +238,69 @@ function doPost(e) {
 }
 
 // ---------------- Users ----------------
+
+// ---------------- Order & shipment notification emails ----------------
+// Uses the same FREE MailApp mechanism as the OTP emails above — no
+// third-party service, no per-message cost, just your Google account's
+// own daily email quota (~100/day on a plain Gmail account, much higher
+// on Google Workspace). Every email send is wrapped in try/catch so a
+// mail failure (e.g. daily quota hit) never breaks the order/status
+// update itself — the sheet is always the source of truth.
+
+function formatOrderItemsPlain(items) {
+  return (items || [])
+    .map((it) => `  • ${it.name} × ${it.qty}${it.price ? ` — ₹${it.price * it.qty}` : ""}`)
+    .join("\n");
+}
+
+// Sent once, right after payment is confirmed.
+function sendOrderConfirmationEmail(order) {
+  try {
+    if (!order || !order.email) return;
+    const subject = `Order confirmed — ${order.orderId} | neobonn`;
+    const body =
+      `Hi ${order.customerName || "there"},\n\n` +
+      `Thanks for shopping with neobonn! Your order has been confirmed.\n\n` +
+      `Order ID: ${order.orderId}\n` +
+      `Items:\n${formatOrderItemsPlain(order.items)}\n\n` +
+      `Total: ₹${order.amount}\n\n` +
+      `Deliver to: ${order.address}, ${order.city} - ${order.pincode}\n\n` +
+      `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}\n\n` +
+      `— Team neobonn`;
+    MailApp.sendEmail(order.email, subject, body);
+  } catch (err) {
+    console.error("sendOrderConfirmationEmail failed: " + err.message);
+  }
+}
+
+// Sent every time an admin moves an order to a new shipment stage.
+function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
+  try {
+    if (!order || !order.email) return;
+    const subject = `Order ${order.orderId} — ${status} | neobonn`;
+    const lines = [
+      `Hi ${order.customerName || "there"},`,
+      "",
+      `Your order ${order.orderId} is now: ${status}${note ? ` — ${note}` : ""}`,
+      "",
+      `Items:`,
+      formatOrderItemsPlain(order.items),
+      "",
+      `Total: ₹${order.amount}`,
+    ];
+    if (carrier) lines.push(`Courier: ${carrier}`);
+    if (trackingNumber) lines.push(`Tracking number: ${trackingNumber}`);
+    lines.push(
+      "",
+      `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}`,
+      "",
+      `— Team neobonn`
+    );
+    MailApp.sendEmail(order.email, subject, lines.join("\n"));
+  } catch (err) {
+    console.error("sendOrderStatusEmail failed: " + err.message);
+  }
+}
 
 function handleSignup({ name, email, phone, password }) {
   const sheet = getSheet("Users");
@@ -534,6 +597,7 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   // call never deducts stock twice for the same order.
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
+  let confirmedOrder = null;
   try {
     const sheet = getSheet("Orders");
     const rows = sheet.getDataRange().getValues();
@@ -545,6 +609,7 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
         if (!alreadyPaid) {
           const items = safeParse(rows[i][1], []); // Items(JSON) column
           deductStock(items);
+          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 17).getValues()[0]);
         }
         break;
       }
@@ -552,6 +617,11 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   } finally {
     lock.releaseLock();
   }
+
+  // Send the confirmation email outside the lock (and only on the first
+  // successful verification) so a slow/failed email send never holds up
+  // the lock for other orders.
+  if (confirmedOrder) sendOrderConfirmationEmail(confirmedOrder);
 
   return { ok: true };
 }
@@ -643,6 +713,7 @@ function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumbe
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
+  let updatedOrder = null;
   try {
     const sheet = getSheet("Orders");
     const rows = sheet.getDataRange().getValues();
@@ -657,10 +728,16 @@ function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumbe
     if (trackingNumber !== undefined) sheet.getRange(rowIndex + 1, 16).setValue(trackingNumber);
     sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history)); // TrackingHistory(JSON)
 
-    return { ok: true, order: rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 17).getValues()[0]) };
+    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 17).getValues()[0]);
   } finally {
     lock.releaseLock();
   }
+
+  // Email the customer outside the lock, so a slow/failed send never
+  // blocks other admin actions.
+  sendOrderStatusEmail(updatedOrder, status, note, carrier, trackingNumber);
+
+  return { ok: true, order: updatedOrder };
 }
 
 // ---------------- Products (Admin Panel) ----------------

@@ -39,6 +39,37 @@ Then:
 4. `VITE_SHEETS_API_URL` in your frontend `.env` stays the same — no
    change needed there.
 
-Existing orders placed before this update will simply show as
-"Order Placed" with no history until you update their status once from
-the new admin Orders tab — nothing breaks.
+## 3. Added: automatic email notifications on every shipment update
+Customers now automatically get an email:
+- Right when payment is confirmed ("Order confirmed").
+- Every time the admin moves the order to a new stage (Confirmed →
+  Shipped → Out for Delivery → Delivered/Cancelled), including any note,
+  courier, and tracking number the admin entered.
+
+This uses Google's built-in `MailApp` (the same free mechanism already
+used for OTP login emails) — **no third-party service, no per-email
+cost.** It's genuinely free forever, subject to your Google account's own
+daily sending quota (~100 emails/day on a plain Gmail account, much
+higher on Google Workspace). If that quota is ever hit, the email simply
+doesn't send that day — it never blocks or breaks the order/status
+update itself.
+
+### About phone/SMS notifications
+There is no SMS or WhatsApp service that is reliably free forever —
+every option (Twilio, Fast2SMS, WhatsApp Cloud API, etc.) is either paid
+or gives a small trial credit that runs out. To avoid setting up
+something that surprises you with a bill later, phone notifications were
+intentionally left out. What customers *do* get instead:
+- The tracking link (`/track-order`) is included in every email, so
+  they can check status themselves on their phone anytime.
+- The customer's phone number is already stored per order (visible to
+  admin in the Orders tab), so you can message them manually via
+  WhatsApp/SMS for high-priority orders if you want to.
+
+If you'd like real SMS/WhatsApp later, the cheapest realistic paid option
+in India is usually an SMS DLT-registered route (a few paise per SMS) or
+the WhatsApp Business API — happy to wire that in whenever you're ready
+to take on that cost.
+
+No manual sheet changes are needed for this — it uses the same Orders
+sheet/columns from step 2 above. Just redeploy the updated `Code.gs`.
