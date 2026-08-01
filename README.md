@@ -44,9 +44,10 @@ Step 3 fixes.
 ## 3. Connect the Google Sheets backend (free, no server)
 
 1. Create a new Google Sheet, name it `Neobonn Database`.
-2. Add 4 tabs exactly named: `Users`, `Enquiries`, `Orders`, `Products`
-   — with the header columns listed at the top of
+2. Add 5 tabs exactly named: `Users`, `Enquiries`, `Orders`, `Products`,
+   `Errors` — with the header columns listed at the top of
    `google-apps-script/Code.gs`.
+   (`Errors` powers the "Oops" screen — see below.)
 3. In the Sheet: **Extensions -> Apps Script**. Delete the placeholder
    code and paste in the entire contents of `google-apps-script/Code.gs`.
 4. In the Apps Script editor: **Project Settings (gear icon) -> Script
@@ -64,6 +65,27 @@ Step 3 fixes.
 8. Restart `npm run dev`. Signups, enquiries, orders and admin product
    edits will now write straight into your Google Sheet — visible in
    real time, filterable, exportable to Excel, no server cost.
+
+### Error handling — the "Oops" screen & trial IDs
+
+If anything breaks for a customer (a crash, a network hiccup, the
+backend being unreachable), they never see a raw error message — they
+see a friendly animated "Oops" screen with a short **trial ID** (e.g.
+`NB-8K2F41`). The real technical detail (message, stack trace, page,
+browser) is logged in the background to the `Errors` tab of your
+Google Sheet, keyed by that same trial ID.
+
+If a customer reports a trial ID:
+
+- Go to **Admin -> Error Logs**, paste the ID into the search box, and
+  you'll see exactly what happened — or
+- Open the `Errors` tab in your Google Sheet directly and search the
+  `TrialId` column.
+
+Relevant files: `src/components/OopsScreen.jsx` (the UI),
+`src/components/ErrorBoundary.jsx` and `GlobalErrorOverlay.jsx` (catch
+render crashes and uncaught/network errors respectively),
+`src/lib/errorReporting.js` (generates the trial ID and logs it).
 
 ## 4. Get a Razorpay account (for real payments)
 

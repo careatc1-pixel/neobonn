@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Papa from "papaparse";
+import { ChevronDown } from "lucide-react";
 import { products as defaultProducts } from "../../data/products";
 import { SheetsAPI } from "../../lib/sheets";
 import { ADMIN_LOGIN_PATH } from "../../App";
+import OrderTimeline, { TRACKING_STAGES } from "../../components/OrderTimeline";
 
 const CSV_HEADER = [
   "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
@@ -82,6 +84,7 @@ const emptyProduct = {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState("products"); // "products" | "orders" | "errors"
   const [list, setList] = useState(defaultProducts);
   const [editing, setEditing] = useState(null); // product being edited, or null
   const [saving, setSaving] = useState(false);
@@ -92,16 +95,140 @@ export default function AdminDashboard() {
   const [importPreview, setImportPreview] = useState(null); // { rows, newCount, updateCount }
   const [importing, setImporting] = useState(false);
 
+  // ---- Orders tab state ----
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersDemoMode, setOrdersDemoMode] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [orderDrafts, setOrderDrafts] = useState({}); // { [orderId]: { status, carrier, trackingNumber, note } }
+  const [orderSavingId, setOrderSavingId] = useState(null);
+
+  const [errorLogs, setErrorLogs] = useState([]);
+  const [errorLogsLoading, setErrorLogsLoading] = useState(false);
+  const [errorLogsLoaded, setErrorLogsLoaded] = useState(false);
+  const [errorLogsDemoMode, setErrorLogsDemoMode] = useState(false);
+  const [errorLogsError, setErrorLogsError] = useState("");
+  const [errorSearch, setErrorSearch] = useState("");
+  const [expandedTrialId, setExpandedTrialId] = useState(null);
+
   useEffect(() => {
     (async () => {
-      const res = await SheetsAPI.listProducts();
-      if (res.demo) {
-        setDemoMode(true);
-        return; // fall back to local defaultProducts already in state
+      try {
+        const res = await SheetsAPI.listProducts();
+        if (res.demo) {
+          setDemoMode(true);
+          return; // fall back to local defaultProducts already in state
+        }
+        if (res.ok) setList(res.products);
+      } catch (err) {
+        console.error("[admin] Failed to load products:", err);
       }
-      if (res.ok) setList(res.products);
     })();
   }, []);
+
+  const loadOrders = async () => {
+    setOrdersLoading(true);
+    setOrdersError("");
+    try {
+      const res = await SheetsAPI.listAllOrders();
+      if (res.demo) {
+        setOrdersDemoMode(true);
+      } else if (res.ok) {
+        setOrders(res.orders);
+      } else {
+        setOrdersError(res.message || "Couldn't load orders.");
+      }
+    } catch (err) {
+      setOrdersError(err.message || "Couldn't load orders.");
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
+  const loadErrorLogs = async () => {
+    setErrorLogsLoading(true);
+    setErrorLogsError("");
+    try {
+      const res = await SheetsAPI.listErrors();
+      if (res.demo) {
+        setErrorLogsDemoMode(true);
+      } else if (res.ok) {
+        setErrorLogs(res.errors || []);
+      } else {
+        setErrorLogsError(res.message || "Couldn't load error logs.");
+      }
+    } catch (err) {
+      setErrorLogsError(err.message || "Couldn't load error logs.");
+    } finally {
+      setErrorLogsLoading(false);
+      setErrorLogsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "errors" && !errorLogsLoaded && !errorLogsLoading) {
+      loadErrorLogs();
+    }
+  }, [tab, errorLogsLoaded, errorLogsLoading]);
+
+  const filteredErrorLogs = errorSearch.trim()
+    ? errorLogs.filter((e) =>
+        (e.trialId || "").toLowerCase().includes(errorSearch.trim().toLowerCase())
+      )
+    : errorLogs;
+
+  const draftFor = (order) =>
+    orderDrafts[order.orderId] || {
+      status: order.trackingStatus || "Order Placed",
+      carrier: order.carrier || "",
+      trackingNumber: order.trackingNumber || "",
+      note: "",
+    };
+
+  const setDraft = (order, patch) =>
+    setOrderDrafts((prev) => ({ ...prev, [order.orderId]: { ...draftFor(order), ...patch } }));
+
+  const saveOrderStatus = async (order) => {
+    const draft = draftFor(order);
+    setOrderSavingId(order.orderId);
+    try {
+      const res = await SheetsAPI.updateOrderStatus({
+        orderId: order.orderId,
+        status: draft.status,
+        carrier: draft.carrier,
+        trackingNumber: draft.trackingNumber,
+        note: draft.note,
+      });
+      if (res.ok) {
+        setOrders((prev) => prev.map((o) => (o.orderId === order.orderId ? res.order : o)));
+        setOrderDrafts((prev) => {
+          const next = { ...prev };
+          delete next[order.orderId];
+          return next;
+        });
+        if (res.skipped) {
+          alert(res.message); // e.g. "Order is already marked \"Shipped\" — no changes made."
+        } else if (res.emailError) {
+          alert(
+            `Status updated, but the notification email failed to send.\n\n` +
+              `Reason: ${res.emailError}\n\n` +
+              `Tip: open Apps Script → run "testEmailSetup" once from the editor to authorize email sending (see CHANGES.md).`
+          );
+        }
+      } else {
+        alert(res.message || "Couldn't update this order. Please try again.");
+      }
+    } catch (err) {
+      alert(err.message || "Couldn't update this order. Please try again.");
+    } finally {
+      setOrderSavingId(null);
+    }
+  };
 
   const logout = () => {
     sessionStorage.removeItem("neobonn_admin");
@@ -246,14 +373,42 @@ export default function AdminDashboard() {
     <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">
-          Admin · Products
+          Admin ·{" "}
+          {tab === "products" ? "Products" : tab === "orders" ? "Orders" : "Error Logs"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
           Logout
         </button>
       </div>
 
-      {demoMode && (
+      <div className="mt-5 inline-flex rounded-full border border-[var(--color-forest)]/15 p-1">
+        <button
+          onClick={() => setTab("products")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "products" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Products
+        </button>
+        <button
+          onClick={() => setTab("orders")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "orders" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Orders &amp; Shipment Tracking
+        </button>
+        <button
+          onClick={() => setTab("errors")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "errors" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Error Logs
+        </button>
+      </div>
+
+      {tab === "products" && demoMode && (
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Demo mode: VITE_SHEETS_API_URL isn't set, so changes here only
           persist in this browser tab (not saved to Google Sheets yet).
@@ -261,6 +416,8 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {tab === "products" && (
+      <>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           onClick={startNew}
@@ -373,6 +530,140 @@ export default function AdminDashboard() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
+
+      {tab === "orders" && (
+        <div className="mt-6">
+          {ordersDemoMode && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so order data can't
+              be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!ordersDemoMode && ordersError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {ordersError}
+              <button onClick={loadOrders} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!ordersDemoMode && !ordersError && ordersLoading && (
+            <p className="text-sm text-[var(--color-charcoal)]/50">Loading orders...</p>
+          )}
+
+          {!ordersDemoMode && !ordersError && !ordersLoading && orders.length === 0 && (
+            <p className="text-sm text-[var(--color-charcoal)]/50">No orders yet.</p>
+          )}
+
+          <div className="space-y-4">
+            {orders.map((order) => {
+              const isOpen = expandedOrderId === order.orderId;
+              const draft = draftFor(order);
+              return (
+                <div key={order.orderId} className="rounded-xl border border-[var(--color-forest)]/10 p-5">
+                  <button
+                    onClick={() => setExpandedOrderId(isOpen ? null : order.orderId)}
+                    className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
+                  >
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{order.orderId}</p>
+                      <p className="text-sm font-medium">{order.customerName} · {order.email}</p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {order.createdAt ? new Date(order.createdAt).toLocaleString("en-IN") : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        (order.status || "").toLowerCase() === "paid" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                      }`}>
+                        {order.status || "Pending"}
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        order.trackingStatus === "Cancelled" ? "bg-red-100 text-red-700" :
+                        order.trackingStatus === "Delivered" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
+                      }`}>
+                        {order.trackingStatus || "Order Placed"}
+                      </span>
+                      <span className="font-display text-lg text-[var(--color-forest-dark)]">₹{order.amount}</span>
+                      <ChevronDown size={16} className={isOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-5 space-y-5 border-t border-[var(--color-forest)]/10 pt-4">
+                      <ul className="space-y-1 text-sm text-[var(--color-charcoal)]/70">
+                        {(order.items || []).map((item, i) => (
+                          <li key={i} className="flex justify-between">
+                            <span>{item.name} × {item.qty}</span>
+                            {item.price && <span>₹{item.price * item.qty}</span>}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <p className="text-xs text-[var(--color-charcoal)]/60">
+                        {order.address}, {order.city} - {order.pincode} · {order.phone}
+                      </p>
+
+                      <OrderTimeline
+                        trackingStatus={order.trackingStatus}
+                        trackingHistory={order.trackingHistory}
+                        stageTimestamps={order.stageTimestamps}
+                        carrier={order.carrier}
+                        trackingNumber={order.trackingNumber}
+                      />
+
+                      <div className="rounded-xl bg-[var(--color-cream-deep)] p-4">
+                        <p className="mb-3 text-sm font-semibold text-[var(--color-forest-dark)]">Update shipment</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <select
+                            value={draft.status}
+                            onChange={(e) => setDraft(order, { status: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          >
+                            {TRACKING_STAGES.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                          <input
+                            placeholder="Courier (e.g. Delhivery)"
+                            value={draft.carrier}
+                            onChange={(e) => setDraft(order, { carrier: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                          <input
+                            placeholder="Tracking number"
+                            value={draft.trackingNumber}
+                            onChange={(e) => setDraft(order, { trackingNumber: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                          <input
+                            placeholder="Note for this update (optional)"
+                            value={draft.note}
+                            onChange={(e) => setDraft(order, { note: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <button
+                          onClick={() => saveOrderStatus(order)}
+                          disabled={orderSavingId === order.orderId}
+                          className="mt-3 rounded-full bg-[var(--color-forest-dark)] px-6 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          {orderSavingId === order.orderId ? "Saving..." : "Save update"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -444,6 +735,119 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {tab === "errors" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Customers never see a raw error — they see an "Oops" screen with
+            a short trial ID instead. Paste that ID in here to see exactly
+            what actually happened.
+          </p>
+
+          {errorLogsDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so error logs can't
+              be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!errorLogsDemoMode && errorLogsError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorLogsError}
+              <button onClick={loadErrorLogs} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!errorLogsDemoMode && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <input
+                value={errorSearch}
+                onChange={(e) => setErrorSearch(e.target.value)}
+                placeholder="Search by trial ID, e.g. NB-8K2F41"
+                className="w-full max-w-xs rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm"
+              />
+              <button
+                onClick={loadErrorLogs}
+                disabled={errorLogsLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {errorLogsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">
+                {filteredErrorLogs.length} of {errorLogs.length} logged
+              </span>
+            </div>
+          )}
+
+          {!errorLogsDemoMode && !errorLogsError && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--color-forest)]/10">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-[var(--color-cream-deep)] text-xs uppercase text-[var(--color-charcoal)]/60">
+                  <tr>
+                    <th className="px-4 py-2.5">Trial ID</th>
+                    <th className="px-4 py-2.5">When</th>
+                    <th className="px-4 py-2.5">Context</th>
+                    <th className="px-4 py-2.5">Message</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-forest)]/10">
+                  {filteredErrorLogs.map((log) => (
+                    <Fragment key={log.trialId}>
+                      <tr
+                        onClick={() =>
+                          setExpandedTrialId((id) => (id === log.trialId ? null : log.trialId))
+                        }
+                        className="cursor-pointer hover:bg-[var(--color-cream-deep)]/50"
+                      >
+                        <td className="px-4 py-2.5 font-display font-semibold text-[var(--color-forest-dark)]">
+                          {log.trialId}
+                        </td>
+                        <td className="px-4 py-2.5 text-[var(--color-charcoal)]/70">
+                          {log.timestamp ? new Date(log.timestamp).toLocaleString() : "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-[var(--color-charcoal)]/70">{log.context}</td>
+                        <td className="max-w-xs truncate px-4 py-2.5 text-[var(--color-charcoal)]/70">
+                          {log.message}
+                        </td>
+                      </tr>
+                      {expandedTrialId === log.trialId && (
+                        <tr>
+                          <td colSpan={4} className="bg-[var(--color-cream-deep)]/40 px-4 py-3">
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Page URL</div>
+                            <div className="mb-2 break-all text-sm">{log.url || "—"}</div>
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Browser</div>
+                            <div className="mb-2 break-all text-sm">{log.userAgent || "—"}</div>
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Full message</div>
+                            <div className="mb-2 whitespace-pre-wrap text-sm">{log.message}</div>
+                            {log.stack && (
+                              <>
+                                <div className="text-xs text-[var(--color-charcoal)]/60">Stack trace</div>
+                                <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-white/70 p-3 text-xs">
+                                  {log.stack}
+                                </pre>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                  {!errorLogsLoading && filteredErrorLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-[var(--color-charcoal)]/50">
+                        {errorSearch ? "No error matches that trial ID." : "No errors logged yet — good sign."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {importPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6">

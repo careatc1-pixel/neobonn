@@ -15,9 +15,41 @@
  *    Orders       | OrderId | Items(JSON) | CustomerName | Email | Phone
  *                 | Address | City | Pincode | Amount | Status
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
+ *                 | TrackingStatus | Carrier | TrackingNumber
+ *                 | TrackingHistory(JSON)
+ *                 | OrderPlacedAt | ConfirmedAt | ShippedAt
+ *                 | OutForDeliveryAt | DeliveredAt | CancelledAt
+ *
+ *    NOTE ON SHIPMENT TRACKING (Amazon-style, one column per stage):
+ *    "Status" (column J) is the PAYMENT status (Pending/Paid).
+ *    "TrackingStatus" (column N) is just the CURRENT shipment stage name,
+ *    for a quick glance. The actual source of truth is the 6 dedicated
+ *    date columns at the end (OrderPlacedAt ... CancelledAt) — each one
+ *    gets a timestamp exactly ONCE, the first time an order reaches that
+ *    stage. Re-saving the same stage again in the admin panel is a no-op
+ *    (idempotent): it will NOT overwrite that column's timestamp and
+ *    will NOT send a duplicate email. "TrackingHistory(JSON)" is kept
+ *    only as a lightweight internal note log for the customer-facing
+ *    timeline UI — you never need to read or edit it by hand; everything
+ *    you'd want to see is in the plain date columns.
+ *    If you're adding these columns to an existing sheet, add them in
+ *    this exact order after CreatedAt — existing rows are read by fixed
+ *    column position (see handlePlaceOrder/handleGetMyOrders) so append,
+ *    don't insert, these columns.
  *    Products     | Id | Name | SeoTitle | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
+ *
+ *    Errors       | TrialId | Timestamp | Message | Stack | Context
+ *                 | Url | UserAgent | Fatal
+ *
+ *    NOTE ON THE ERRORS SHEET: the storefront never shows customers a
+ *    raw error message — instead it shows a friendly "Oops" screen with
+ *    a short trial ID (e.g. "NB-8K2F41"). The real technical detail
+ *    (message, stack trace, page URL, browser) is written here, keyed
+ *    by that same trial ID. If a customer reports a trial ID, look it
+ *    up in Admin -> Error Logs (or directly in this tab) to see exactly
+ *    what went wrong.
  *
  *    IMPORTANT: these Products headers must be spelled EXACTLY as above
  *    (case-sensitive) in row 1 of the Products tab — the script looks
@@ -60,7 +92,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-07-31-seo-title-v3";
+const CODE_VERSION = "2026-08-01-order-emails-v2-idempotent";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -200,6 +232,12 @@ function doPost(e) {
         return jsonResponse(handleVerifyPayment(payload));
       case "getMyOrders":
         return jsonResponse(handleGetMyOrders(payload));
+      case "trackOrder":
+        return jsonResponse(handleTrackOrder(payload));
+      case "listAllOrders":
+        return jsonResponse(handleListAllOrders());
+      case "updateOrderStatus":
+        return jsonResponse(handleUpdateOrderStatus(payload));
       case "listProducts":
         return jsonResponse(handleListProducts());
       case "upsertProduct":
@@ -210,6 +248,10 @@ function doPost(e) {
         return jsonResponse(handleUpdateStock(payload));
       case "bulkUpsertProducts":
         return jsonResponse(handleBulkUpsertProducts(payload));
+      case "logError":
+        return jsonResponse(handleLogError(payload));
+      case "listErrors":
+        return jsonResponse(handleListErrors());
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -219,6 +261,96 @@ function doPost(e) {
 }
 
 // ---------------- Users ----------------
+
+// ---------------- Order & shipment notification emails ----------------
+// Uses the same FREE MailApp mechanism as the OTP emails above — no
+// third-party service, no per-message cost, just your Google account's
+// own daily email quota (~100/day on a plain Gmail account, much higher
+// on Google Workspace). Every email send is wrapped in try/catch so a
+// mail failure (e.g. daily quota hit) never breaks the order/status
+// update itself — the sheet is always the source of truth.
+
+function formatOrderItemsPlain(items) {
+  return (items || [])
+    .map((it) => `  • ${it.name} × ${it.qty}${it.price ? ` — ₹${it.price * it.qty}` : ""}`)
+    .join("\n");
+}
+
+// Sent once, right after payment is confirmed.
+function sendOrderConfirmationEmail(order) {
+  try {
+    if (!order || !order.email) return { ok: false, error: "No email on order." };
+    const subject = `Order confirmed — ${order.orderId} | neobonn`;
+    const body =
+      `Hi ${order.customerName || "there"},\n\n` +
+      `Thanks for shopping with neobonn! Your order has been confirmed.\n\n` +
+      `Order ID: ${order.orderId}\n` +
+      `Items:\n${formatOrderItemsPlain(order.items)}\n\n` +
+      `Total: ₹${order.amount}\n\n` +
+      `Deliver to: ${order.address}, ${order.city} - ${order.pincode}\n\n` +
+      `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}\n\n` +
+      `— Team neobonn`;
+    MailApp.sendEmail(order.email, subject, body);
+    return { ok: true };
+  } catch (err) {
+    console.error("sendOrderConfirmationEmail failed: " + err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// Sent every time an admin moves an order to a new shipment stage.
+function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
+  try {
+    if (!order || !order.email) return { ok: false, error: "No email on order." };
+    const subject = `Order ${order.orderId} — ${status} | neobonn`;
+    const lines = [
+      `Hi ${order.customerName || "there"},`,
+      "",
+      `Your order ${order.orderId} is now: ${status}${note ? ` — ${note}` : ""}`,
+      "",
+      `Items:`,
+      formatOrderItemsPlain(order.items),
+      "",
+      `Total: ₹${order.amount}`,
+    ];
+    if (carrier) lines.push(`Courier: ${carrier}`);
+    if (trackingNumber) lines.push(`Tracking number: ${trackingNumber}`);
+    lines.push(
+      "",
+      `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}`,
+      "",
+      `— Team neobonn`
+    );
+    MailApp.sendEmail(order.email, subject, lines.join("\n"));
+    return { ok: true };
+  } catch (err) {
+    console.error("sendOrderStatusEmail failed: " + err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// ---- One-time setup helper — RUN THIS MANUALLY ONCE FROM THE EDITOR ----
+// The #1 reason order emails silently never arrive: MailApp has never
+// been authorized for this script. Apps Script only asks for that
+// permission the first time a function using MailApp actually *runs*
+// inside the editor (not via the deployed Web App — Web App calls fail
+// silently if authorization was never granted).
+//
+// HOW TO USE: Apps Script editor → function dropdown (top, next to Debug)
+// → select "testEmailSetup" → click Run (▶). The first time, Google will
+// show a permission screen — click "Advanced" → "Go to (project name),
+// unsafe" → "Allow". Then check the inbox of your OWN Google account
+// (the one that owns this Apps Script project / deployment) for a test
+// email. Once that arrives, order emails will start working too.
+function testEmailSetup() {
+  const to = Session.getEffectiveUser().getEmail();
+  MailApp.sendEmail(
+    to,
+    "neobonn: email setup test ✅",
+    "If you're reading this, MailApp is authorized on this script and order confirmation / shipment status emails will now work."
+  );
+  return "Test email sent to: " + to;
+}
 
 function handleSignup({ name, email, phone, password }) {
   const sheet = getSheet("Users");
@@ -423,6 +555,11 @@ function handlePlaceOrder({ items, customer, amount }) {
       return { ok: false, message: "Could not create payment order: " + reason };
     }
 
+    const initialHistory = [
+      { status: "Order Placed", note: "We've received your order.", at: new Date().toISOString() },
+    ];
+    const now = new Date();
+
     getSheet("Orders").appendRow([
       orderId,
       JSON.stringify(items),
@@ -436,7 +573,17 @@ function handlePlaceOrder({ items, customer, amount }) {
       "Pending",
       rzpOrder.id || "",
       "",
-      new Date(),
+      now, // CreatedAt
+      "Order Placed", // TrackingStatus
+      "", // Carrier
+      "", // TrackingNumber
+      JSON.stringify(initialHistory), // TrackingHistory(JSON) — internal note log only
+      now, // OrderPlacedAt
+      "", // ConfirmedAt
+      "", // ShippedAt
+      "", // OutForDeliveryAt
+      "", // DeliveredAt
+      "", // CancelledAt
     ]);
 
     return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
@@ -507,6 +654,7 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   // call never deducts stock twice for the same order.
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
+  let confirmedOrder = null;
   try {
     const sheet = getSheet("Orders");
     const rows = sheet.getDataRange().getValues();
@@ -518,6 +666,7 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
         if (!alreadyPaid) {
           const items = safeParse(rows[i][1], []); // Items(JSON) column
           deductStock(items);
+          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 23).getValues()[0]);
         }
         break;
       }
@@ -526,7 +675,55 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
     lock.releaseLock();
   }
 
+  // Send the confirmation email outside the lock (and only on the first
+  // successful verification) so a slow/failed email send never holds up
+  // the lock for other orders.
+  if (confirmedOrder) sendOrderConfirmationEmail(confirmedOrder);
+
   return { ok: true };
+}
+
+// Maps a shipment status name to which column holds its "reached at"
+// timestamp. This is the single source of truth for stage progression —
+// each column is written exactly once (see handleUpdateOrderStatus).
+const STAGE_COLUMNS = {
+  "Order Placed": 18, // R
+  Confirmed: 19, // S
+  Shipped: 20, // T
+  "Out for Delivery": 21, // U
+  Delivered: 22, // V
+  Cancelled: 23, // W
+};
+const TRACKING_STAGES = ["Order Placed", "Confirmed", "Shipped", "Out for Delivery", "Delivered"];
+
+// Shared: turns one Orders sheet row into the object the frontend uses.
+function rowToOrderObject(r) {
+  const stageTimestamps = {};
+  Object.keys(STAGE_COLUMNS).forEach((stage) => {
+    const val = r[STAGE_COLUMNS[stage] - 1]; // convert 1-based column -> 0-based array index
+    if (val) stageTimestamps[stage] = val;
+  });
+
+  return {
+    orderId: r[0],
+    items: safeParse(r[1], []),
+    customerName: r[2],
+    email: r[3],
+    phone: r[4],
+    address: r[5],
+    city: r[6],
+    pincode: r[7],
+    amount: r[8],
+    status: r[9], // payment status: Pending | Paid
+    createdAt: r[12],
+    trackingStatus: r[13] || "Order Placed",
+    carrier: r[14] || "",
+    trackingNumber: r[15] || "",
+    trackingHistory: safeParse(r[16], []), // internal note log, for the timeline UI only
+    // Clean, Amazon-style per-stage timestamps — e.g. stageTimestamps.Shipped
+    // is either an ISO date string or absent if not reached yet.
+    stageTimestamps,
+  };
 }
 
 function handleGetMyOrders({ email }) {
@@ -535,22 +732,138 @@ function handleGetMyOrders({ email }) {
   const [, ...data] = rows;
   const orders = data
     .filter((r) => r[0] && r[3] === email) // column D = Email
-    .map((r) => ({
-      orderId: r[0],
-      items: safeParse(r[1], []),
-      customerName: r[2],
-      email: r[3],
-      phone: r[4],
-      address: r[5],
-      city: r[6],
-      pincode: r[7],
-      amount: r[8],
-      status: r[9],
-      createdAt: r[12],
-    }))
+    .map(rowToOrderObject)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return { ok: true, orders };
+}
+
+// ---------------- Shipment tracking ----------------
+
+// Public "Track your order" lookup — no login required, but still scoped
+// so a random orderId alone can't pull up someone else's order: the
+// requester must also know the email (or phone) on the order.
+function handleTrackOrder({ orderId, email, phone }) {
+  if (!orderId || (!email && !phone)) {
+    return { ok: false, message: "Please provide your Order ID and the email or phone used to order." };
+  }
+  const sheet = getSheet("Orders");
+  const rows = sheet.getDataRange().getValues();
+  const [, ...data] = rows;
+  const match = data.find(
+    (r) =>
+      String(r[0]).trim().toLowerCase() === String(orderId).trim().toLowerCase() &&
+      ((email && String(r[3]).trim().toLowerCase() === String(email).trim().toLowerCase()) ||
+        (phone && String(r[4]).trim() === String(phone).trim()))
+  );
+  if (!match) {
+    return { ok: false, message: "No order found with that Order ID and email/phone combination." };
+  }
+  return { ok: true, order: rowToOrderObject(match) };
+}
+
+// Admin: full order list (across all customers), newest first, for the
+// admin dashboard's Orders tab. Mirrors the existing admin panel's
+// security model (client-side gate only, like listProducts/upsertProduct)
+// rather than introducing a new auth layer inconsistent with the rest of
+// this file.
+function handleListAllOrders() {
+  const sheet = getSheet("Orders");
+  const rows = sheet.getDataRange().getValues();
+  const [, ...data] = rows;
+  const orders = data
+    .filter((r) => r[0])
+    .map(rowToOrderObject)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return { ok: true, orders };
+}
+
+// Admin: moves an order to a new shipment stage (or "Cancelled").
+//
+// PROFESSIONAL / AMAZON-STYLE BEHAVIOUR:
+// - Each stage (Order Placed, Confirmed, Shipped, Out for Delivery,
+//   Delivered, Cancelled) has its own dedicated date column. That column
+//   is written EXACTLY ONCE — the first time the order reaches that
+//   stage. Saving the same stage again is a safe no-op: nothing is
+//   overwritten, no duplicate email is sent, no duplicate log entry is
+//   added.
+// - Once an order is Cancelled, no further status changes are allowed.
+// - Carrier / tracking number can still be added or corrected on top of
+//   an already-reached stage (e.g. tracking number arrives a day after
+//   "Shipped" was set) — that alone still counts as a real update and
+//   still notifies the customer, without touching the stage timestamp.
+function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumber }) {
+  if (!orderId || !status) return { ok: false, message: "orderId and status are required." };
+  if (!STAGE_COLUMNS[status]) {
+    return { ok: false, message: "Unknown status: " + status };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  let updatedOrder = null;
+  let isMeaningfulChange = false;
+  try {
+    const sheet = getSheet("Orders");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && r[0] === orderId);
+    if (rowIndex === -1) return { ok: false, message: "Order not found." };
+
+    const row = rows[rowIndex];
+    if (row[STAGE_COLUMNS["Cancelled"] - 1]) {
+      return { ok: false, message: "This order is already cancelled — no further status changes are allowed." };
+    }
+
+    const stageCol = STAGE_COLUMNS[status];
+    const stageAlreadyReached = !!row[stageCol - 1];
+    const currentCarrier = row[14] || "";
+    const currentTrackingNumber = row[15] || "";
+    const carrierChanged = carrier !== undefined && carrier !== currentCarrier;
+    const trackingNumberChanged = trackingNumber !== undefined && trackingNumber !== currentTrackingNumber;
+
+    isMeaningfulChange = !stageAlreadyReached || carrierChanged || trackingNumberChanged;
+
+    if (!isMeaningfulChange) {
+      // Nothing actually changed — same status re-saved with the same
+      // carrier/tracking number. Return the order as-is, no writes at all.
+      return {
+        ok: true,
+        order: rowToOrderObject(row),
+        skipped: true,
+        message: `Order is already marked "${status}" — no changes made.`,
+      };
+    }
+
+    if (!stageAlreadyReached) {
+      sheet.getRange(rowIndex + 1, stageCol).setValue(new Date()); // e.g. ShippedAt
+      sheet.getRange(rowIndex + 1, 14).setValue(status); // TrackingStatus — current stage
+    }
+    if (carrier !== undefined) sheet.getRange(rowIndex + 1, 15).setValue(carrier);
+    if (trackingNumber !== undefined) sheet.getRange(rowIndex + 1, 16).setValue(trackingNumber);
+
+    // Internal note log (for the customer-facing timeline UI only — not
+    // something you need to read directly in the sheet).
+    const history = safeParse(row[16], []);
+    history.push({ status, note: note || "", at: new Date().toISOString() });
+    sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history));
+
+    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 23).getValues()[0]);
+  } finally {
+    lock.releaseLock();
+  }
+
+  // Email the customer outside the lock, so a slow/failed send never
+  // blocks other admin actions. Only for a real change (see above).
+  let emailResult = { ok: true, skipped: true };
+  if (isMeaningfulChange) {
+    emailResult = sendOrderStatusEmail(updatedOrder, status, note, carrier, trackingNumber);
+  }
+
+  return {
+    ok: true,
+    order: updatedOrder,
+    emailSent: !!emailResult.ok && !emailResult.skipped,
+    emailError: emailResult.ok ? null : emailResult.error,
+  };
 }
 
 // ---------------- Products (Admin Panel) ----------------
@@ -655,4 +968,47 @@ function safeParse(str, fallback) {
   } catch {
     return fallback;
   }
+}
+
+// ---------------- Error log (trial IDs) ----------------
+// The storefront never shows a customer the raw error/stack — it shows
+// a friendly "Oops" screen with a short trial ID and sends the real
+// technical detail here in the background. See the Errors sheet columns
+// documented at the top of this file, and src/lib/errorReporting.js on
+// the frontend.
+
+function handleLogError({ trialId, message, stack, context, url, userAgent, fatal }) {
+  getSheet("Errors").appendRow([
+    trialId || "",
+    new Date(),
+    message || "",
+    stack || "",
+    context || "",
+    url || "",
+    userAgent || "",
+    !!fatal,
+  ]);
+  return { ok: true, trialId };
+}
+
+// admin: every logged error, newest first — lets you paste in a
+// customer's trial ID and instantly see what actually happened.
+function handleListErrors() {
+  const sheet = getSheet("Errors");
+  const rows = sheet.getDataRange().getValues();
+  const errors = rows
+    .slice(1)
+    .filter((r) => r[0]) // skip blank rows
+    .map((r) => ({
+      trialId: r[0],
+      timestamp: r[1],
+      message: r[2],
+      stack: r[3],
+      context: r[4],
+      url: r[5],
+      userAgent: r[6],
+      fatal: r[7],
+    }))
+    .reverse();
+  return { ok: true, errors };
 }

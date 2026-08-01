@@ -20,6 +20,7 @@ const FacebookIcon = (props) => (
 );
 
 const LEGAL_LINKS = [
+  { to: "/track-order", label: "Track Order" },
   { to: "/privacy-policy", label: "Privacy Policy" },
   { to: "/refund-policy", label: "Refund Policy" },
   { to: "/terms-of-service", label: "Terms of Service" },
