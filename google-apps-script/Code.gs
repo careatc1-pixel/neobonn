@@ -15,6 +15,19 @@
  *    Orders       | OrderId | Items(JSON) | CustomerName | Email | Phone
  *                 | Address | City | Pincode | Amount | Status
  *                 | RazorpayOrderId | RazorpayPaymentId | CreatedAt
+ *                 | TrackingStatus | Carrier | TrackingNumber
+ *                 | TrackingHistory(JSON)
+ *
+ *    NOTE ON SHIPMENT TRACKING: "Status" (column J) is the PAYMENT status
+ *    (Pending/Paid). "TrackingStatus" (column N) is the SHIPMENT status
+ *    the admin panel moves an order through: Order Placed -> Confirmed ->
+ *    Shipped -> Out for Delivery -> Delivered (or Cancelled). Every change
+ *    is appended to "TrackingHistory(JSON)" as {status, note, at} so the
+ *    customer-facing tracking page can show a full timeline. If you're
+ *    adding these columns to an existing sheet, just add the 4 new
+ *    headers after CreatedAt — existing rows are read by fixed column
+ *    position (see handlePlaceOrder/handleGetMyOrders) so append, don't
+ *    insert, these columns.
  *    Products     | Id | Name | SeoTitle | Tagline | Category | Price | ComingSoon
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
@@ -37,6 +50,10 @@
  * 3. Project Settings > Script Properties, add:
  *      RAZORPAY_KEY_ID       = rzp_live_xxxxx (or rzp_test_xxxxx)
  *      RAZORPAY_KEY_SECRET   = your_secret_key
+ *      GOOGLE_CLIENT_ID      = your OAuth Web client ID
+ *                              (same value as VITE_GOOGLE_CLIENT_ID in the
+ *                              frontend .env — needed for "Continue with
+ *                              Google" login to work)
  * 4. Deploy > New deployment > type "Web app".
  *      Execute as:  Me
  *      Who has access: Anyone
@@ -56,7 +73,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-07-31-seo-title-v3";
+const CODE_VERSION = "2026-08-01-order-tracking-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -184,6 +201,8 @@ function doPost(e) {
         return jsonResponse(handleSendOtp(payload));
       case "verifyOtpLogin":
         return jsonResponse(handleVerifyOtpLogin(payload));
+      case "googleLogin":
+        return jsonResponse(handleGoogleLogin(payload));
       case "resetPasswordWithOtp":
         return jsonResponse(handleResetPasswordWithOtp(payload));
       case "enquiry":
@@ -194,6 +213,12 @@ function doPost(e) {
         return jsonResponse(handleVerifyPayment(payload));
       case "getMyOrders":
         return jsonResponse(handleGetMyOrders(payload));
+      case "trackOrder":
+        return jsonResponse(handleTrackOrder(payload));
+      case "listAllOrders":
+        return jsonResponse(handleListAllOrders());
+      case "updateOrderStatus":
+        return jsonResponse(handleUpdateOrderStatus(payload));
       case "listProducts":
         return jsonResponse(handleListProducts());
       case "upsertProduct":
@@ -287,6 +312,59 @@ function handleVerifyOtpLogin({ email, otp }) {
   return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
 }
 
+// ---------------- Google Sign-In ----------------
+// Verifies the ID token (JWT) sent from the frontend's Google button by
+// asking Google's own tokeninfo endpoint to validate its signature and
+// return the decoded payload. This confirms the token is genuine and was
+// issued for OUR client ID (not spoofed), without needing any JWT
+// library. Requires a Script Property:
+//   GOOGLE_CLIENT_ID = <your OAuth Web client ID>.apps.googleusercontent.com
+// (same value as VITE_GOOGLE_CLIENT_ID in the frontend .env)
+
+function handleGoogleLogin({ credential }) {
+  if (!credential) return { ok: false, message: "Missing Google credential." };
+
+  const clientId = PropertiesService.getScriptProperties().getProperty("GOOGLE_CLIENT_ID");
+  if (!clientId) {
+    return { ok: false, message: "Google Sign-In is not configured yet. Add GOOGLE_CLIENT_ID in Script Properties." };
+  }
+
+  let payload;
+  try {
+    const res = UrlFetchApp.fetch(
+      "https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(credential),
+      { muteHttpExceptions: true }
+    );
+    payload = JSON.parse(res.getContentText());
+  } catch (err) {
+    return { ok: false, message: "Could not verify Google credential." };
+  }
+
+  if (!payload || payload.aud !== clientId) {
+    return { ok: false, message: "Google credential is invalid or was issued for a different app." };
+  }
+  if (payload.email_verified !== "true" && payload.email_verified !== true) {
+    return { ok: false, message: "This Google account's email is not verified." };
+  }
+
+  const email = payload.email;
+  const name = payload.name || email.split("@")[0];
+
+  const sheet = getSheet("Users");
+  const rows = sheet.getDataRange().getValues();
+  const match = rows.find((r) => r[1] === email);
+
+  if (match) {
+    return { ok: true, user: { name: match[0], email: match[1], phone: match[2] } };
+  }
+
+  // First time signing in with Google — create an account automatically.
+  // Password column is left blank; this user can only sign in via Google
+  // or OTP unless they later set a password from "Forgot password".
+  sheet.appendRow([name, email, "", "", new Date()]);
+  return { ok: true, user: { name, email, phone: "" } };
+}
+
 function handleResetPasswordWithOtp({ email, otp, newPassword }) {
   const cache = CacheService.getScriptCache();
   const stored = cache.get(`otp_reset_${email}`);
@@ -364,6 +442,10 @@ function handlePlaceOrder({ items, customer, amount }) {
       return { ok: false, message: "Could not create payment order: " + reason };
     }
 
+    const initialHistory = [
+      { status: "Order Placed", note: "We've received your order.", at: new Date().toISOString() },
+    ];
+
     getSheet("Orders").appendRow([
       orderId,
       JSON.stringify(items),
@@ -378,6 +460,10 @@ function handlePlaceOrder({ items, customer, amount }) {
       rzpOrder.id || "",
       "",
       new Date(),
+      "Order Placed", // TrackingStatus
+      "", // Carrier
+      "", // TrackingNumber
+      JSON.stringify(initialHistory), // TrackingHistory(JSON)
     ]);
 
     return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
@@ -470,28 +556,111 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
   return { ok: true };
 }
 
+// Shared: turns one Orders sheet row into the object the frontend uses.
+function rowToOrderObject(r) {
+  return {
+    orderId: r[0],
+    items: safeParse(r[1], []),
+    customerName: r[2],
+    email: r[3],
+    phone: r[4],
+    address: r[5],
+    city: r[6],
+    pincode: r[7],
+    amount: r[8],
+    status: r[9], // payment status: Pending | Paid
+    createdAt: r[12],
+    trackingStatus: r[13] || "Order Placed",
+    carrier: r[14] || "",
+    trackingNumber: r[15] || "",
+    trackingHistory: safeParse(r[16], []),
+  };
+}
+
 function handleGetMyOrders({ email }) {
   const sheet = getSheet("Orders");
   const rows = sheet.getDataRange().getValues();
   const [, ...data] = rows;
   const orders = data
     .filter((r) => r[0] && r[3] === email) // column D = Email
-    .map((r) => ({
-      orderId: r[0],
-      items: safeParse(r[1], []),
-      customerName: r[2],
-      email: r[3],
-      phone: r[4],
-      address: r[5],
-      city: r[6],
-      pincode: r[7],
-      amount: r[8],
-      status: r[9],
-      createdAt: r[12],
-    }))
+    .map(rowToOrderObject)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return { ok: true, orders };
+}
+
+// ---------------- Shipment tracking ----------------
+
+// Public "Track your order" lookup — no login required, but still scoped
+// so a random orderId alone can't pull up someone else's order: the
+// requester must also know the email (or phone) on the order.
+function handleTrackOrder({ orderId, email, phone }) {
+  if (!orderId || (!email && !phone)) {
+    return { ok: false, message: "Please provide your Order ID and the email or phone used to order." };
+  }
+  const sheet = getSheet("Orders");
+  const rows = sheet.getDataRange().getValues();
+  const [, ...data] = rows;
+  const match = data.find(
+    (r) =>
+      String(r[0]).trim().toLowerCase() === String(orderId).trim().toLowerCase() &&
+      ((email && String(r[3]).trim().toLowerCase() === String(email).trim().toLowerCase()) ||
+        (phone && String(r[4]).trim() === String(phone).trim()))
+  );
+  if (!match) {
+    return { ok: false, message: "No order found with that Order ID and email/phone combination." };
+  }
+  return { ok: true, order: rowToOrderObject(match) };
+}
+
+// Admin: full order list (across all customers), newest first, for the
+// admin dashboard's Orders tab. Mirrors the existing admin panel's
+// security model (client-side gate only, like listProducts/upsertProduct)
+// rather than introducing a new auth layer inconsistent with the rest of
+// this file.
+function handleListAllOrders() {
+  const sheet = getSheet("Orders");
+  const rows = sheet.getDataRange().getValues();
+  const [, ...data] = rows;
+  const orders = data
+    .filter((r) => r[0])
+    .map(rowToOrderObject)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return { ok: true, orders };
+}
+
+const TRACKING_STAGES = ["Order Placed", "Confirmed", "Shipped", "Out for Delivery", "Delivered"];
+
+// Admin: moves an order to a new shipment stage (or "Cancelled"), records
+// an optional courier + tracking number, and appends a timestamped entry
+// to TrackingHistory(JSON) so the customer sees a full timeline, not just
+// the current status.
+function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumber }) {
+  if (!orderId || !status) return { ok: false, message: "orderId and status are required." };
+  if (TRACKING_STAGES.indexOf(status) === -1 && status !== "Cancelled") {
+    return { ok: false, message: "Unknown status: " + status };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Orders");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && r[0] === orderId);
+    if (rowIndex === -1) return { ok: false, message: "Order not found." };
+
+    const history = safeParse(rows[rowIndex][16], []);
+    history.push({ status, note: note || "", at: new Date().toISOString() });
+
+    sheet.getRange(rowIndex + 1, 14).setValue(status); // TrackingStatus
+    if (carrier !== undefined) sheet.getRange(rowIndex + 1, 15).setValue(carrier);
+    if (trackingNumber !== undefined) sheet.getRange(rowIndex + 1, 16).setValue(trackingNumber);
+    sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history)); // TrackingHistory(JSON)
+
+    return { ok: true, order: rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 17).getValues()[0]) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------- Products (Admin Panel) ----------------

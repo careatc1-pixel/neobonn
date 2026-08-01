@@ -38,6 +38,7 @@ export const SheetsAPI = {
   sendOtp: (email, purpose) => callSheetsApi("sendOtp", { email, purpose }), // purpose: "login" | "reset"
   verifyOtpLogin: (email, otp) => callSheetsApi("verifyOtpLogin", { email, otp }),
   resetPasswordWithOtp: (data) => callSheetsApi("resetPasswordWithOtp", data), // {email, otp, newPassword}
+  loginWithGoogle: (credential) => callSheetsApi("googleLogin", { credential }), // credential = Google ID token (JWT)
 
   // ---- Enquiries sheet ----
   submitEnquiry: (data) => callSheetsApi("enquiry", data), // {name, email, phone, message}
@@ -46,6 +47,11 @@ export const SheetsAPI = {
   placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, ...}
   verifyPayment: (data) => callSheetsApi("verifyPayment", data), // {orderId, razorpay_payment_id, razorpay_signature}
   getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // customer order history
+
+  // ---- Shipment tracking ----
+  trackOrder: (data) => callSheetsApi("trackOrder", data), // {orderId, email} -> public lookup, no login needed
+  listAllOrders: () => callSheetsApi("listAllOrders"), // admin: every order, newest first
+  updateOrderStatus: (data) => callSheetsApi("updateOrderStatus", data), // admin: {orderId, status, note?, carrier?, trackingNumber?}
 
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),

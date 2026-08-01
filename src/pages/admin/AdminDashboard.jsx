@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Papa from "papaparse";
+import { ChevronDown } from "lucide-react";
 import { products as defaultProducts } from "../../data/products";
 import { SheetsAPI } from "../../lib/sheets";
+import { ADMIN_LOGIN_PATH } from "../../App";
+import OrderTimeline, { TRACKING_STAGES } from "../../components/OrderTimeline";
 
 const CSV_HEADER = [
   "Id", "Name", "Tagline", "Category", "Price", "ComingSoon", "Image",
@@ -81,6 +84,7 @@ const emptyProduct = {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState("products"); // "products" | "orders"
   const [list, setList] = useState(defaultProducts);
   const [editing, setEditing] = useState(null); // product being edited, or null
   const [saving, setSaving] = useState(false);
@@ -90,6 +94,14 @@ export default function AdminDashboard() {
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null); // { rows, newCount, updateCount }
   const [importing, setImporting] = useState(false);
+
+  // ---- Orders tab state ----
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersDemoMode, setOrdersDemoMode] = useState(false);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [orderDrafts, setOrderDrafts] = useState({}); // { [orderId]: { status, carrier, trackingNumber, note } }
+  const [orderSavingId, setOrderSavingId] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -102,9 +114,58 @@ export default function AdminDashboard() {
     })();
   }, []);
 
+  const loadOrders = async () => {
+    setOrdersLoading(true);
+    const res = await SheetsAPI.listAllOrders();
+    if (res.demo) {
+      setOrdersDemoMode(true);
+    } else if (res.ok) {
+      setOrders(res.orders);
+    }
+    setOrdersLoading(false);
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
+  const draftFor = (order) =>
+    orderDrafts[order.orderId] || {
+      status: order.trackingStatus || "Order Placed",
+      carrier: order.carrier || "",
+      trackingNumber: order.trackingNumber || "",
+      note: "",
+    };
+
+  const setDraft = (order, patch) =>
+    setOrderDrafts((prev) => ({ ...prev, [order.orderId]: { ...draftFor(order), ...patch } }));
+
+  const saveOrderStatus = async (order) => {
+    const draft = draftFor(order);
+    setOrderSavingId(order.orderId);
+    const res = await SheetsAPI.updateOrderStatus({
+      orderId: order.orderId,
+      status: draft.status,
+      carrier: draft.carrier,
+      trackingNumber: draft.trackingNumber,
+      note: draft.note,
+    });
+    if (res.ok) {
+      setOrders((prev) => prev.map((o) => (o.orderId === order.orderId ? res.order : o)));
+      setOrderDrafts((prev) => {
+        const next = { ...prev };
+        delete next[order.orderId];
+        return next;
+      });
+    } else {
+      alert(res.message || "Couldn't update this order. Please try again.");
+    }
+    setOrderSavingId(null);
+  };
+
   const logout = () => {
     sessionStorage.removeItem("neobonn_admin");
-    navigate("/admin");
+    navigate(ADMIN_LOGIN_PATH);
   };
 
   const startNew = () => setEditing({ ...emptyProduct });
@@ -245,14 +306,33 @@ export default function AdminDashboard() {
     <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">
-          Admin · Products
+          Admin · {tab === "products" ? "Products" : "Orders"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
           Logout
         </button>
       </div>
 
-      {demoMode && (
+      <div className="mt-5 inline-flex rounded-full border border-[var(--color-forest)]/15 p-1">
+        <button
+          onClick={() => setTab("products")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "products" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Products
+        </button>
+        <button
+          onClick={() => setTab("orders")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "orders" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Orders &amp; Shipment Tracking
+        </button>
+      </div>
+
+      {tab === "products" && demoMode && (
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Demo mode: VITE_SHEETS_API_URL isn't set, so changes here only
           persist in this browser tab (not saved to Google Sheets yet).
@@ -260,6 +340,8 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {tab === "products" && (
+      <>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           onClick={startNew}
@@ -372,6 +454,130 @@ export default function AdminDashboard() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
+
+      {tab === "orders" && (
+        <div className="mt-6">
+          {ordersDemoMode && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so order data can't
+              be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!ordersDemoMode && ordersLoading && (
+            <p className="text-sm text-[var(--color-charcoal)]/50">Loading orders...</p>
+          )}
+
+          {!ordersDemoMode && !ordersLoading && orders.length === 0 && (
+            <p className="text-sm text-[var(--color-charcoal)]/50">No orders yet.</p>
+          )}
+
+          <div className="space-y-4">
+            {orders.map((order) => {
+              const isOpen = expandedOrderId === order.orderId;
+              const draft = draftFor(order);
+              return (
+                <div key={order.orderId} className="rounded-xl border border-[var(--color-forest)]/10 p-5">
+                  <button
+                    onClick={() => setExpandedOrderId(isOpen ? null : order.orderId)}
+                    className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
+                  >
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{order.orderId}</p>
+                      <p className="text-sm font-medium">{order.customerName} · {order.email}</p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {order.createdAt ? new Date(order.createdAt).toLocaleString("en-IN") : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        (order.status || "").toLowerCase() === "paid" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                      }`}>
+                        {order.status || "Pending"}
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        order.trackingStatus === "Cancelled" ? "bg-red-100 text-red-700" :
+                        order.trackingStatus === "Delivered" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
+                      }`}>
+                        {order.trackingStatus || "Order Placed"}
+                      </span>
+                      <span className="font-display text-lg text-[var(--color-forest-dark)]">₹{order.amount}</span>
+                      <ChevronDown size={16} className={isOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-5 space-y-5 border-t border-[var(--color-forest)]/10 pt-4">
+                      <ul className="space-y-1 text-sm text-[var(--color-charcoal)]/70">
+                        {(order.items || []).map((item, i) => (
+                          <li key={i} className="flex justify-between">
+                            <span>{item.name} × {item.qty}</span>
+                            {item.price && <span>₹{item.price * item.qty}</span>}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <p className="text-xs text-[var(--color-charcoal)]/60">
+                        {order.address}, {order.city} - {order.pincode} · {order.phone}
+                      </p>
+
+                      <OrderTimeline
+                        trackingStatus={order.trackingStatus}
+                        trackingHistory={order.trackingHistory}
+                        carrier={order.carrier}
+                        trackingNumber={order.trackingNumber}
+                      />
+
+                      <div className="rounded-xl bg-[var(--color-cream-deep)] p-4">
+                        <p className="mb-3 text-sm font-semibold text-[var(--color-forest-dark)]">Update shipment</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <select
+                            value={draft.status}
+                            onChange={(e) => setDraft(order, { status: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          >
+                            {TRACKING_STAGES.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                          <input
+                            placeholder="Courier (e.g. Delhivery)"
+                            value={draft.carrier}
+                            onChange={(e) => setDraft(order, { carrier: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                          <input
+                            placeholder="Tracking number"
+                            value={draft.trackingNumber}
+                            onChange={(e) => setDraft(order, { trackingNumber: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                          <input
+                            placeholder="Note for this update (optional)"
+                            value={draft.note}
+                            onChange={(e) => setDraft(order, { note: e.target.value })}
+                            className="rounded-lg border border-[var(--color-forest)]/20 bg-white px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <button
+                          onClick={() => saveOrderStatus(order)}
+                          disabled={orderSavingId === order.orderId}
+                          className="mt-3 rounded-full bg-[var(--color-forest-dark)] px-6 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          {orderSavingId === order.orderId ? "Saving..." : "Save update"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

@@ -50,7 +50,7 @@ export default function Checkout() {
       if (orderRes.demo) {
         // No backend wired up yet — simulate success so the UI flow is testable.
         clearCart();
-        navigate("/order-success");
+        navigate("/order-success", { state: { email: address.email } });
         return;
       }
 
@@ -91,7 +91,7 @@ export default function Checkout() {
           });
           if (verify.ok) {
             clearCart();
-            navigate("/order-success");
+            navigate("/order-success", { state: { orderId, email: address.email } });
           } else {
             setError("Payment could not be verified. Please contact support.");
           }

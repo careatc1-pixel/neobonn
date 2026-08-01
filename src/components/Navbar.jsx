@@ -22,7 +22,7 @@ export default function Navbar() {
     <header className="sticky top-0 z-50 border-b border-[var(--color-forest)]/10 bg-[var(--color-cream)]/90 backdrop-blur">
       <nav className="mx-auto flex max-w-[1600px] items-center justify-between px-5 py-3 md:px-8">
         <Link to="/" className="flex items-center gap-2.5">
-          <img src={logo} alt="neobonn icon" className="h-11 w-auto object-contain md:h-14" />
+          <img src={logo} alt="neobonn icon" width="330" height="349" className="h-11 w-auto object-contain md:h-14" />
           <span className="flex flex-col leading-none">
             <span className="font-display text-xl tracking-wide md:text-2xl">
               <span className="text-[var(--color-forest-dark)]">neo</span><span className="text-[var(--color-gold)]">bonn</span>

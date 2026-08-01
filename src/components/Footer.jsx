@@ -20,6 +20,7 @@ const FacebookIcon = (props) => (
 );
 
 const LEGAL_LINKS = [
+  { to: "/track-order", label: "Track Order" },
   { to: "/privacy-policy", label: "Privacy Policy" },
   { to: "/refund-policy", label: "Refund Policy" },
   { to: "/terms-of-service", label: "Terms of Service" },
@@ -39,7 +40,7 @@ export default function Footer() {
       <div className="relative mx-auto max-w-[1120px] px-5 pb-12 pt-14 text-center md:px-8">
         {/* Logo + wordmark */}
         <Link to="/" className="inline-flex flex-col items-center gap-2.5">
-          <img src={logo} alt="neobonn icon" className="h-16 w-auto object-contain drop-shadow-sm" />
+          <img src={logo} alt="neobonn icon" width="330" height="349" className="h-16 w-auto object-contain drop-shadow-sm" />
           <span className="font-display text-2xl tracking-wide">
             <span className="text-[var(--color-cream)]">neo</span><span className="text-[var(--color-gold-light)]">bonn</span>
           </span>
