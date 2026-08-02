@@ -6,6 +6,7 @@ import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import AnalyticsRouteTracker from "./components/AnalyticsRouteTracker";
 import ErrorBoundary from "./components/ErrorBoundary";
+import HelpDesk from "./components/HelpDesk";
 
 import Home from "./pages/Home";
 import Products from "./pages/Products";
@@ -110,6 +111,7 @@ export default function App() {
         </ErrorBoundary>
       </main>
       <Footer />
+      <HelpDesk />
     </div>
   );
 }

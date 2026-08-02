@@ -163,6 +163,11 @@ export const SheetsAPI = {
   reviewReturn: (data) => callSheetsApi("reviewReturn", data), // admin: {returnId, decision: "approved"|"rejected", adminNote?} — approving a Return auto-refunds via Razorpay
   retryRefund: (returnId) => callSheetsApi("retryRefund", { returnId }), // admin: retry a refund that failed the first time
 
+  // ---- Help Desk / callback requests (chat widget) ----
+  requestCallback: (data) => callSheetsApi("requestCallback", data), // {name?, phone, email?, orderId?, queryType, message?, preferredTime?}
+  listCallbackRequests: () => callSheetsApi("listCallbackRequests"), // admin: every request, newest first
+  updateCallbackStatus: (data) => callSheetsApi("updateCallbackStatus", data), // admin: {requestId, status, adminNote?}
+
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),
   upsertProduct: (product) => callSheetsApi("upsertProduct", product),

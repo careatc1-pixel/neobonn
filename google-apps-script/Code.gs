@@ -70,6 +70,20 @@
  *    Razorpay dashboard needed. "Exchange" approvals don't move money;
  *    the admin arranges the replacement shipment separately.
  *
+ *    CallbackRequests | RequestId | Name | Email | Phone | OrderId
+ *                 | QueryType | Message | PreferredTime | Status
+ *                 | RequestedAt | ResolvedAt | AdminNote
+ *
+ *    NOTE ON THE HELP DESK / CALLBACK REQUESTS: the storefront's chat
+ *    widget (bottom-right "Need help?" bubble) lets a customer pick an
+ *    order + describe their issue, then choose either "Chat on
+ *    WhatsApp" (opens a prefilled wa.me link to the business number) or
+ *    "Request a callback" (writes a row here). "Status" moves
+ *    Pending -> Contacted -> Resolved (or Cancelled), managed from
+ *    Admin -> Help Desk. A confirmation email goes to the customer (if
+ *    they gave one) and a notification email goes to the store owner
+ *    the moment a new request comes in, so nothing sits unnoticed.
+ *
  *    IMPORTANT: these Products headers must be spelled EXACTLY as above
  *    (case-sensitive) in row 1 of the Products tab — the script looks
  *    up each column BY NAME, not by position, so you can safely
@@ -111,7 +125,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-02-masked-sender-name-v1";
+const CODE_VERSION = "2026-08-02-helpdesk-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -281,6 +295,12 @@ function doPost(e) {
         return jsonResponse(handleReviewReturn(payload));
       case "retryRefund":
         return jsonResponse(handleRetryRefund(payload));
+      case "requestCallback":
+        return jsonResponse(handleRequestCallback(payload));
+      case "listCallbackRequests":
+        return jsonResponse(handleListCallbackRequests());
+      case "updateCallbackStatus":
+        return jsonResponse(handleUpdateCallbackStatus(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -1385,6 +1405,130 @@ function handleRetryRefund({ returnId }) {
     sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || "");
 
     return { ok: refundOutcome.ok, refund: refundOutcome, message: refundOutcome.ok ? undefined : refundOutcome.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------- Help Desk / callback requests ----------------
+// Powers the storefront's "Need help?" chat widget: customer picks an
+// order + a query type, then either opens a prefilled WhatsApp chat to
+// the business number, or asks for a callback (which lands here).
+
+const HELPDESK_WHATSAPP_NUMBER = "919310035064"; // company WhatsApp Business number, with country code
+
+function rowToCallbackObject(r) {
+  return {
+    requestId: r[0],
+    name: r[1],
+    email: r[2],
+    phone: r[3],
+    orderId: r[4],
+    queryType: r[5],
+    message: r[6],
+    preferredTime: r[7],
+    status: r[8] || "Pending",
+    requestedAt: r[9],
+    resolvedAt: r[10],
+    adminNote: r[11],
+  };
+}
+
+// Customer-facing: submitted from the help desk widget's "Request a
+// callback" step.
+function handleRequestCallback({ name, phone, email, orderId, queryType, message, preferredTime }) {
+  if (!phone || !phone.trim()) return { ok: false, message: "Please share a phone number so we can call you back." };
+  if (!queryType) return { ok: false, message: "Please tell us what this is about." };
+
+  const sheet = getSheet("CallbackRequests");
+  const requestId = "CB" + new Date().getTime();
+  const now = new Date();
+
+  sheet.appendRow([
+    requestId,
+    name || "",
+    email || "",
+    phone.trim(),
+    orderId || "",
+    queryType,
+    message || "",
+    preferredTime || "",
+    "Pending",
+    now,
+    "", // ResolvedAt
+    "", // AdminNote
+  ]);
+
+  // Confirmation to the customer (best-effort — only if they gave an email).
+  if (email) {
+    try {
+      MailApp.sendEmail(
+        email,
+        `We've got your request — ${requestId} | neobonn`,
+        `Hi ${name || "there"},\n\n` +
+          `Thanks for reaching out! Our support team will call you back shortly on ${phone}.\n\n` +
+          `Request ID: ${requestId}\n` +
+          `About: ${queryType}${orderId ? ` (Order ${orderId})` : ""}\n` +
+          (message ? `Your message: ${message}\n\n` : "\n") +
+          `— Team neobonn`,
+        { name: "neobonn" }
+      );
+    } catch (err) {
+      console.error("Callback confirmation email failed: " + err.message);
+    }
+  }
+
+  // Notify the store owner so new requests don't sit unnoticed.
+  try {
+    MailApp.sendEmail(
+      Session.getEffectiveUser().getEmail(),
+      `New help desk request — ${requestId}`,
+      `Name: ${name || "(not given)"}\nPhone: ${phone}\nEmail: ${email || "(not given)"}\n` +
+        `Order: ${orderId || "(none specified)"}\nAbout: ${queryType}\n` +
+        (message ? `Message: ${message}\n\n` : "\n") +
+        `Reply from Admin -> Help Desk, or call/WhatsApp them directly.`
+    );
+  } catch (err) {
+    console.error("Callback admin-notify email failed: " + err.message);
+  }
+
+  return { ok: true, requestId, whatsappNumber: HELPDESK_WHATSAPP_NUMBER };
+}
+
+// admin: every help desk request, newest first.
+function handleListCallbackRequests() {
+  const rows = getSheet("CallbackRequests").getDataRange().getValues();
+  const requests = rows
+    .slice(1)
+    .filter((r) => r[0])
+    .map(rowToCallbackObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, requests, whatsappNumber: HELPDESK_WHATSAPP_NUMBER };
+}
+
+// admin: move a request through Pending -> Contacted -> Resolved (or
+// Cancelled), with an optional internal note.
+function handleUpdateCallbackStatus({ requestId, status, adminNote }) {
+  const VALID_STATUSES = ["Pending", "Contacted", "Resolved", "Cancelled"];
+  if (!requestId || !status) return { ok: false, message: "requestId and status are required." };
+  if (VALID_STATUSES.indexOf(status) === -1) return { ok: false, message: "Unknown status: " + status };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("CallbackRequests");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && r[0] === requestId);
+    if (rowIndex === -1) return { ok: false, message: "Request not found." };
+
+    sheet.getRange(rowIndex + 1, 9).setValue(status); // Status
+    if (status === "Resolved" || status === "Cancelled") {
+      sheet.getRange(rowIndex + 1, 11).setValue(new Date()); // ResolvedAt
+    }
+    if (adminNote !== undefined) sheet.getRange(rowIndex + 1, 12).setValue(adminNote); // AdminNote
+
+    const updated = rowToCallbackObject(sheet.getRange(rowIndex + 1, 1, 1, 12).getValues()[0]);
+    return { ok: true, request: updated };
   } finally {
     lock.releaseLock();
   }

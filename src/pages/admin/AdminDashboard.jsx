@@ -123,6 +123,17 @@ export default function AdminDashboard() {
   const [returnNoteDrafts, setReturnNoteDrafts] = useState({}); // { [returnId]: adminNote }
   const [returnActionMsg, setReturnActionMsg] = useState({}); // { [returnId]: { type: "success"|"error", text } }
 
+  // ---- Help Desk tab state ----
+  const [callbacks, setCallbacks] = useState([]);
+  const [callbacksLoading, setCallbacksLoading] = useState(false);
+  const [callbacksLoaded, setCallbacksLoaded] = useState(false);
+  const [callbacksDemoMode, setCallbacksDemoMode] = useState(false);
+  const [callbacksError, setCallbacksError] = useState("");
+  const [expandedCallbackId, setExpandedCallbackId] = useState(null);
+  const [callbackActionId, setCallbackActionId] = useState(null);
+  const [callbackNoteDrafts, setCallbackNoteDrafts] = useState({}); // { [requestId]: adminNote }
+  const [callbackActionMsg, setCallbackActionMsg] = useState({}); // { [requestId]: { type, text } }
+
   useEffect(() => {
     (async () => {
       try {
@@ -218,6 +229,53 @@ export default function AdminDashboard() {
       loadReturns();
     }
   }, [tab, returnsLoaded, returnsLoading]);
+
+  const loadCallbacks = async () => {
+    setCallbacksLoading(true);
+    setCallbacksError("");
+    try {
+      const res = await SheetsAPI.listCallbackRequests();
+      if (res.demo) {
+        setCallbacksDemoMode(true);
+      } else if (res.ok) {
+        setCallbacks(res.requests || []);
+      } else {
+        setCallbacksError(res.message || "Couldn't load help desk requests.");
+      }
+    } catch (err) {
+      setCallbacksError(err.message || "Couldn't load help desk requests.");
+    } finally {
+      setCallbacksLoading(false);
+      setCallbacksLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "helpdesk" && !callbacksLoaded && !callbacksLoading) {
+      loadCallbacks();
+    }
+  }, [tab, callbacksLoaded, callbacksLoading]);
+
+  const handleUpdateCallback = async (requestId, status) => {
+    setCallbackActionId(requestId);
+    try {
+      const res = await SheetsAPI.updateCallbackStatus({
+        requestId,
+        status,
+        adminNote: callbackNoteDrafts[requestId] ?? undefined,
+      });
+      if (res.ok) {
+        setCallbacks((prev) => prev.map((c) => (c.requestId === requestId ? res.request : c)));
+        flashMessage(setCallbackActionMsg, requestId, "success", `Marked as ${status}.`);
+      } else {
+        flashMessage(setCallbackActionMsg, requestId, "error", res.message || "Couldn't update this request.");
+      }
+    } catch (err) {
+      flashMessage(setCallbackActionMsg, requestId, "error", err.message || "Couldn't update this request.");
+    } finally {
+      setCallbackActionId(null);
+    }
+  };
 
   const handleReviewReturn = async (returnId, decision) => {
     setReturnActionId(returnId);
@@ -504,6 +562,8 @@ export default function AdminDashboard() {
             ? "Orders"
             : tab === "returns"
             ? "Returns & Refunds"
+            : tab === "helpdesk"
+            ? "Help Desk"
             : "Error Logs"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
@@ -535,6 +595,14 @@ export default function AdminDashboard() {
           }`}
         >
           Returns &amp; Refunds
+        </button>
+        <button
+          onClick={() => setTab("helpdesk")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "helpdesk" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Help Desk
         </button>
         <button
           onClick={() => setTab("errors")}
@@ -1076,6 +1144,160 @@ export default function AdminDashboard() {
                       }`}
                     >
                       {returnActionMsg[r.returnId].text}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "helpdesk" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Requests submitted from the storefront's "Need help?" chat
+            widget land here. Call or WhatsApp the customer directly, then
+            mark the request Contacted / Resolved so nothing falls through
+            the cracks.
+          </p>
+
+          {callbacksDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so help desk
+              requests can't be loaded here yet. See README.md to connect
+              the backend.
+            </div>
+          )}
+
+          {!callbacksDemoMode && callbacksError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {callbacksError}
+              <button onClick={loadCallbacks} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!callbacksDemoMode && (
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={loadCallbacks}
+                disabled={callbacksLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {callbacksLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">{callbacks.length} total</span>
+            </div>
+          )}
+
+          {!callbacksDemoMode && !callbacksLoading && callbacks.length === 0 && !callbacksError && (
+            <p className="mt-6 text-center text-sm text-[var(--color-charcoal)]/50">
+              No help desk requests yet.
+            </p>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {callbacks.map((c) => {
+              const isOpen = expandedCallbackId === c.requestId;
+              const busy = callbackActionId === c.requestId;
+              const digitsOnly = (c.phone || "").replace(/\D/g, "");
+              const waNumber = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
+              return (
+                <div key={c.requestId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{c.requestId}</p>
+                      <p className="text-sm text-[var(--color-charcoal)]/60">
+                        {c.name || "(no name)"} · {c.phone}
+                        {c.orderId ? ` · Order ${c.orderId}` : ""}
+                      </p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {c.requestedAt ? new Date(c.requestedAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        c.status === "Resolved"
+                          ? "bg-green-100 text-green-700"
+                          : c.status === "Cancelled"
+                          ? "bg-red-100 text-red-700"
+                          : c.status === "Contacted"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {c.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-3 text-sm font-medium text-[var(--color-charcoal)]/80">{c.queryType}</p>
+                  {c.message && <p className="mt-1 text-sm text-[var(--color-charcoal)]/60">{c.message}</p>}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {digitsOnly && (
+                      <>
+                        <a
+                          href={`tel:+${waNumber}`}
+                          className="rounded-full border border-[var(--color-forest)]/20 px-3 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)]"
+                        >
+                          Call
+                        </a>
+                        <a
+                          href={`https://wa.me/${waNumber}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full bg-[#25D366] px-3 py-1.5 text-xs font-semibold text-white"
+                        >
+                          WhatsApp customer
+                        </a>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setExpandedCallbackId(isOpen ? null : c.requestId)}
+                    className="mt-3 text-xs font-semibold text-[var(--color-forest-dark)] underline"
+                  >
+                    {isOpen ? "Hide" : "Update status"}
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2 border-t border-[var(--color-forest)]/10 pt-3">
+                      <label className="text-xs font-semibold text-[var(--color-charcoal)]/60">
+                        Internal note (optional)
+                      </label>
+                      <textarea
+                        value={callbackNoteDrafts[c.requestId] ?? c.adminNote ?? ""}
+                        onChange={(e) =>
+                          setCallbackNoteDrafts((prev) => ({ ...prev, [c.requestId]: e.target.value }))
+                        }
+                        rows={2}
+                        className="w-full rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {["Pending", "Contacted", "Resolved", "Cancelled"].map((s) => (
+                          <button
+                            key={s}
+                            disabled={busy || c.status === s}
+                            onClick={() => handleUpdateCallback(c.requestId, s)}
+                            className="rounded-full border border-[var(--color-forest)]/20 px-4 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)] disabled:opacity-40"
+                          >
+                            {busy ? "..." : s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {callbackActionMsg[c.requestId] && (
+                    <p
+                      className={`mt-3 text-xs font-medium ${
+                        callbackActionMsg[c.requestId].type === "success" ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {callbackActionMsg[c.requestId].text}
                     </p>
                   )}
                 </div>
