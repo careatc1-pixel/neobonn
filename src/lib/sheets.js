@@ -30,6 +30,12 @@ function friendlyNetworkError(technicalMessage, action) {
   return err;
 }
 
+// Apps Script Web Apps can genuinely take a while (cold starts, sheet
+// locks, sending emails) — but if the browser waits forever, the UI
+// looks "stuck" and then dies with a confusing generic error. Cap it
+// so we fail fast with a clear, honest message instead.
+const REQUEST_TIMEOUT_MS = 45000;
+
 async function callSheetsApi(action, payload = {}) {
   if (!API_URL) {
     console.warn(
@@ -38,6 +44,9 @@ async function callSheetsApi(action, payload = {}) {
     return { ok: false, demo: true };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   let res;
   try {
     res = await fetch(API_URL, {
@@ -45,8 +54,25 @@ async function callSheetsApi(action, payload = {}) {
       // Apps Script Web Apps require text/plain to avoid CORS preflight
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action, payload }),
+      signal: controller.signal,
     });
   } catch (err) {
+    if (err.name === "AbortError") {
+      // We gave up waiting — but the request may well have kept running
+      // on Google's side and actually succeeded. Say so honestly instead
+      // of implying nothing happened.
+      const trialId = reportError({
+        message: `Timed out after ${REQUEST_TIMEOUT_MS / 1000}s waiting for "${action}".`,
+        context: `Sheets API: ${action}`,
+      });
+      const timeoutErr = new Error(
+        `This is taking longer than expected. It may have already gone through — please refresh and check before retrying. ` +
+          `Reference ID: ${trialId}`
+      );
+      timeoutErr.trialId = trialId;
+      timeoutErr.isTimeout = true;
+      throw timeoutErr;
+    }
     // Network-level failure (DNS, CORS block, offline, wrong domain) —
     // never even reached the server, so there's no status code at all.
     // Full detail goes to the error log; the customer only sees a
@@ -55,6 +81,8 @@ async function callSheetsApi(action, payload = {}) {
       `Could not reach the order backend for "${action}" (network error: ${err.message}).`,
       action
     );
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!res.ok) {
@@ -74,7 +102,16 @@ async function callSheetsApi(action, payload = {}) {
       action
     );
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    // Got a 200 OK, but the body wasn't valid JSON — happens if Google
+    // returns an HTML error page instead of our script's response.
+    throw friendlyNetworkError(
+      `Sheets API for "${action}" returned a non-JSON response (${err.message}).`,
+      action
+    );
+  }
 }
 
 export const SheetsAPI = {

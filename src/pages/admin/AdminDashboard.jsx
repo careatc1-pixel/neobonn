@@ -103,6 +103,7 @@ export default function AdminDashboard() {
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderDrafts, setOrderDrafts] = useState({}); // { [orderId]: { status, carrier, trackingNumber, note } }
   const [orderSavingId, setOrderSavingId] = useState(null);
+  const [orderActionMsg, setOrderActionMsg] = useState({}); // { [orderId]: { type: "success"|"error", text } }
 
   const [errorLogs, setErrorLogs] = useState([]);
   const [errorLogsLoading, setErrorLogsLoading] = useState(false);
@@ -120,6 +121,7 @@ export default function AdminDashboard() {
   const [expandedReturnId, setExpandedReturnId] = useState(null);
   const [returnActionId, setReturnActionId] = useState(null); // returnId currently being approved/rejected/retried
   const [returnNoteDrafts, setReturnNoteDrafts] = useState({}); // { [returnId]: adminNote }
+  const [returnActionMsg, setReturnActionMsg] = useState({}); // { [returnId]: { type: "success"|"error", text } }
 
   useEffect(() => {
     (async () => {
@@ -228,15 +230,29 @@ export default function AdminDashboard() {
       if (res.ok) {
         setReturns((prev) => prev.map((r) => (r.returnId === returnId ? res.returnRequest : r)));
         if (res.refundError) {
-          setReturnsError(
-            `"${returnId}" was approved, but the automatic refund failed: ${res.refundError}. Use "Retry refund" below once resolved.`
+          flashMessage(
+            setReturnActionMsg,
+            returnId,
+            "error",
+            `Approved, but the automatic refund failed: ${res.refundError}. Use "Retry refund" below once resolved.`
           );
+        } else if (decision === "approved" && res.returnRequest?.type === "Return") {
+          flashMessage(
+            setReturnActionMsg,
+            returnId,
+            "success",
+            `Return approved ✅ — refund of ₹${res.returnRequest.refundAmount} processed and customer notified by email.`
+          );
+        } else if (decision === "approved") {
+          flashMessage(setReturnActionMsg, returnId, "success", "Exchange approved ✅ — customer notified by email.");
+        } else {
+          flashMessage(setReturnActionMsg, returnId, "success", "Request rejected — customer notified by email.");
         }
       } else {
-        setReturnsError(res.message || "Couldn't update this request.");
+        flashMessage(setReturnActionMsg, returnId, "error", res.message || "Couldn't update this request.");
       }
     } catch (err) {
-      setReturnsError(err.message || "Couldn't update this request.");
+      flashMessage(setReturnActionMsg, returnId, "error", err.message || "Couldn't update this request.");
     } finally {
       setReturnActionId(null);
     }
@@ -249,14 +265,30 @@ export default function AdminDashboard() {
       if (res.refund) {
         await loadReturns();
       }
-      if (!res.ok) {
-        setReturnsError(res.message || res.refund?.message || "Refund retry failed.");
+      if (res.ok) {
+        flashMessage(setReturnActionMsg, returnId, "success", `Refund of ₹${res.refund?.amount} processed successfully ✅`);
+      } else {
+        flashMessage(setReturnActionMsg, returnId, "error", res.message || res.refund?.message || "Refund retry failed.");
       }
     } catch (err) {
-      setReturnsError(err.message || "Refund retry failed.");
+      flashMessage(setReturnActionMsg, returnId, "error", err.message || "Refund retry failed.");
     } finally {
       setReturnActionId(null);
     }
+  };
+
+  // Shows a one-off success/error message next to a specific order or
+  // return card, then clears it after a few seconds.
+  const flashMessage = (setter, key, type, text) => {
+    setter((prev) => ({ ...prev, [key]: { type, text } }));
+    setTimeout(() => {
+      setter((prev) => {
+        if (prev[key]?.text !== text) return prev; // a newer message replaced it — leave it alone
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }, 6000);
   };
 
   const draftFor = (order) =>
@@ -289,19 +321,34 @@ export default function AdminDashboard() {
           return next;
         });
         if (res.skipped) {
-          alert(res.message); // e.g. "Order is already marked \"Shipped\" — no changes made."
+          flashMessage(setOrderActionMsg, order.orderId, "success", res.message);
         } else if (res.emailError) {
-          alert(
-            `Status updated, but the notification email failed to send.\n\n` +
-              `Reason: ${res.emailError}\n\n` +
-              `Tip: open Apps Script → run "testEmailSetup" once from the editor to authorize email sending (see CHANGES.md).`
+          flashMessage(
+            setOrderActionMsg,
+            order.orderId,
+            "success",
+            `Shipment updated to "${draft.status}" ✅ — but the customer notification email failed to send (${res.emailError}). Run "testEmailSetup" in Apps Script once to fix this.`
+          );
+        } else {
+          flashMessage(
+            setOrderActionMsg,
+            order.orderId,
+            "success",
+            `Shipment updated to "${draft.status}" ✅ — customer notified by email.`
           );
         }
       } else {
-        alert(res.message || "Couldn't update this order. Please try again.");
+        flashMessage(setOrderActionMsg, order.orderId, "error", res.message || "Couldn't update this order. Please try again.");
       }
     } catch (err) {
-      alert(err.message || "Couldn't update this order. Please try again.");
+      flashMessage(
+        setOrderActionMsg,
+        order.orderId,
+        "error",
+        err.isTimeout
+          ? err.message
+          : err.message || "Couldn't update this order. Please try again."
+      );
     } finally {
       setOrderSavingId(null);
     }
@@ -746,6 +793,15 @@ export default function AdminDashboard() {
                         >
                           {orderSavingId === order.orderId ? "Saving..." : "Save update"}
                         </button>
+                        {orderActionMsg[order.orderId] && (
+                          <p
+                            className={`mt-2 text-xs font-medium ${
+                              orderActionMsg[order.orderId].type === "success" ? "text-green-700" : "text-red-700"
+                            }`}
+                          >
+                            {orderActionMsg[order.orderId].text}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1011,6 +1067,16 @@ export default function AdminDashboard() {
                         <p className="text-xs text-[var(--color-charcoal)]/60">Note: {r.adminNote}</p>
                       )}
                     </div>
+                  )}
+
+                  {returnActionMsg[r.returnId] && (
+                    <p
+                      className={`mt-3 text-xs font-medium ${
+                        returnActionMsg[r.returnId].type === "success" ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {returnActionMsg[r.returnId].text}
+                    </p>
                   )}
                 </div>
               );
