@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
   Package, ChevronDown, ChevronRight, RotateCcw, MessageCircle,
-  Heart, Gift, UserRound, ShoppingBag,
+  Heart, Gift, UserRound, ShoppingBag, MapPinned,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
@@ -12,6 +12,7 @@ import { openHelpDesk } from "../lib/helpDeskBus";
 import SEO from "../components/SEO";
 import OrderTimeline from "../components/OrderTimeline";
 import ReturnRequestModal from "../components/ReturnRequestModal";
+import AddressBook from "../components/AddressBook";
 
 const RETURN_WINDOW_DAYS = 7;
 
@@ -191,8 +192,9 @@ export default function Account() {
       </div>
 
       {/* ---- Quick action cards ---- */}
-      <div className="mt-4 grid grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <QuickActionCard icon={ShoppingBag} label="Your Orders" onClick={() => scrollToSection("orders")} />
+        <QuickActionCard icon={MapPinned} label="Addresses" onClick={() => scrollToSection("addresses")} />
         <QuickActionCard icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
         <QuickActionCard icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
       </div>
@@ -216,6 +218,7 @@ export default function Account() {
         <h2 className="px-1 font-display text-lg text-[var(--color-forest-dark)]">Your Information</h2>
         <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
           <InfoRow icon={RotateCcw} label="Your Refunds" onClick={() => scrollToSection("refunds")} />
+          <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => scrollToSection("addresses")} />
           <InfoRow icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
           <InfoRow icon={Gift} label="E-Gift Cards" badge="Soon" />
           <InfoRow icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
@@ -325,6 +328,16 @@ export default function Account() {
             );
           })}
         </div>
+      </div>
+
+      {/* ---- Saved Addresses ---- */}
+      <div id="addresses" className="mt-12 scroll-mt-6">
+        <h2 className="font-display text-xl text-[var(--color-forest-dark)]">Saved Addresses</h2>
+        <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
+          Save multiple delivery addresses and pick one at checkout — or tap "Use my current
+          location" to fill one in automatically.
+        </p>
+        <AddressBook />
       </div>
 
       {/* ---- Wishlist ---- */}

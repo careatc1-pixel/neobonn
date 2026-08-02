@@ -74,6 +74,24 @@
  *                 | QueryType | Message | PreferredTime | Status
  *                 | RequestedAt | ResolvedAt | AdminNote
  *
+ *    Addresses    | AddressId | Email | Label | Name | Phone | Line1
+ *                 | Line2 | City | State | Pincode | Lat | Lng
+ *                 | IsDefault | CreatedAt | UpdatedAt
+ *
+ *    NOTE ON SAVED ADDRESSES (multi-address "deliver here" book): one
+ *    signed-in customer (matched by Email) can save several delivery
+ *    addresses — e.g. Home, Work, Mom's place — and pick one at
+ *    checkout instead of retyping it every time. "Lat"/"Lng" are
+ *    filled in automatically when the customer taps "Use my current
+ *    location" on the address form (browser geolocation, reverse-
+ *    geocoded client-side to a street address via OpenStreetMap's free
+ *    Nominatim API — no Google Maps billing needed) — they're stored
+ *    only as a reference point for that address, not used to restrict
+ *    where someone can order from. "IsDefault" marks the one address
+ *    that's pre-selected at checkout; only one row per Email may have
+ *    IsDefault = TRUE at a time (handled automatically whenever an
+ *    address is saved or set as default).
+ *
  *    NOTE ON THE HELP DESK / CALLBACK REQUESTS: the storefront's chat
  *    widget (bottom-right "Need help?" bubble) lets a customer pick an
  *    order + describe their issue, then choose either "Chat on
@@ -301,6 +319,14 @@ function doPost(e) {
         return jsonResponse(handleListCallbackRequests());
       case "updateCallbackStatus":
         return jsonResponse(handleUpdateCallbackStatus(payload));
+      case "saveAddress":
+        return jsonResponse(handleSaveAddress(payload));
+      case "getMyAddresses":
+        return jsonResponse(handleGetMyAddresses(payload));
+      case "deleteAddress":
+        return jsonResponse(handleDeleteAddress(payload));
+      case "setDefaultAddress":
+        return jsonResponse(handleSetDefaultAddress(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -1529,6 +1555,225 @@ function handleUpdateCallbackStatus({ requestId, status, adminNote }) {
 
     const updated = rowToCallbackObject(sheet.getRange(rowIndex + 1, 1, 1, 12).getValues()[0]);
     return { ok: true, request: updated };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------- Saved Addresses (multi-address delivery book) ----------------
+// One signed-in customer (matched by Email) can save several delivery
+// addresses and pick one at checkout instead of retyping it every
+// time. Lat/Lng come from the browser's geolocation + free reverse-
+// geocoding on the frontend (see src/lib/geolocation.js) when the
+// customer taps "Use my current location" — they're just a reference
+// point stored alongside the typed-out address, nothing more.
+
+const ADDRESS_COLUMNS = [
+  "AddressId", "Email", "Label", "Name", "Phone", "Line1", "Line2",
+  "City", "State", "Pincode", "Lat", "Lng", "IsDefault", "CreatedAt", "UpdatedAt",
+];
+
+function rowToAddressObject(r) {
+  return {
+    addressId: r[0],
+    email: r[1],
+    label: r[2],
+    name: r[3],
+    phone: r[4],
+    line1: r[5],
+    line2: r[6],
+    city: r[7],
+    state: r[8],
+    pincode: r[9],
+    lat: r[10] === "" ? null : Number(r[10]),
+    lng: r[11] === "" ? null : Number(r[11]),
+    isDefault: r[12] === true || r[12] === "TRUE",
+    createdAt: r[13],
+    updatedAt: r[14],
+  };
+}
+
+function addressToRowArray(a) {
+  return [
+    a.addressId,
+    a.email,
+    a.label || "Home",
+    a.name || "",
+    a.phone || "",
+    a.line1 || "",
+    a.line2 || "",
+    a.city || "",
+    a.state || "",
+    a.pincode || "",
+    a.lat === null || a.lat === undefined ? "" : a.lat,
+    a.lng === null || a.lng === undefined ? "" : a.lng,
+    !!a.isDefault,
+    a.createdAt,
+    a.updatedAt,
+  ];
+}
+
+// Creates a new saved address, or updates an existing one (when
+// payload.addressId is given and belongs to that email). If the
+// address is marked default — or it's the customer's very first saved
+// address — every other address for that same email is un-defaulted
+// so exactly one row stays the default at any time.
+function handleSaveAddress(payload) {
+  const { addressId, email, label, name, phone, line1, city, pincode } = payload || {};
+  if (!email) return { ok: false, message: "Please sign in to save an address." };
+  if (!name || !phone || !line1 || !city || !pincode) {
+    return { ok: false, message: "Name, phone, address line, city and pincode are required." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    const emailRows = rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r, i }) => i > 0 && String(r[1]).toLowerCase() === String(email).toLowerCase());
+
+    const isFirstAddress = emailRows.length === 0;
+    const wantsDefault = !!payload.isDefault || isFirstAddress;
+    const now = new Date();
+
+    let targetRowIndex = -1;
+    if (addressId) {
+      targetRowIndex = emailRows.findIndex(({ r }) => String(r[0]) === String(addressId));
+    }
+
+    // Un-default every other address for this customer first, if this
+    // one is becoming the default.
+    if (wantsDefault) {
+      emailRows.forEach(({ i }) => {
+        if (rows[i][0] !== addressId) sheet.getRange(i + 1, 13).setValue(false); // IsDefault column
+      });
+    }
+
+    if (addressId && targetRowIndex !== -1) {
+      // Update in place — keep original AddressId/CreatedAt.
+      const existing = rows[emailRows[targetRowIndex].i];
+      const updated = {
+        addressId: existing[0],
+        email,
+        label: label || existing[2],
+        name,
+        phone,
+        line1,
+        line2: payload.line2 !== undefined ? payload.line2 : existing[6],
+        city,
+        state: payload.state !== undefined ? payload.state : existing[8],
+        pincode,
+        lat: payload.lat !== undefined ? payload.lat : existing[10],
+        lng: payload.lng !== undefined ? payload.lng : existing[11],
+        isDefault: wantsDefault,
+        createdAt: existing[13],
+        updatedAt: now,
+      };
+      sheet.getRange(emailRows[targetRowIndex].i + 1, 1, 1, ADDRESS_COLUMNS.length).setValues([addressToRowArray(updated)]);
+      return { ok: true, address: rowToAddressObject(addressToRowArray(updated)) };
+    }
+
+    // Otherwise, create a brand-new saved address.
+    const newAddress = {
+      addressId: "ADDR" + now.getTime(),
+      email,
+      label: label || "Home",
+      name,
+      phone,
+      line1,
+      line2: payload.line2 || "",
+      city,
+      state: payload.state || "",
+      pincode,
+      lat: payload.lat ?? "",
+      lng: payload.lng ?? "",
+      isDefault: wantsDefault,
+      createdAt: now,
+      updatedAt: now,
+    };
+    sheet.appendRow(addressToRowArray(newAddress));
+    return { ok: true, address: rowToAddressObject(addressToRowArray(newAddress)) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Every saved address for one customer, most-recently-updated first,
+// with the default address (if any) pinned to the top.
+function handleGetMyAddresses({ email }) {
+  if (!email) return { ok: false, message: "Email is required." };
+  const rows = getSheet("Addresses").getDataRange().getValues();
+  const addresses = rows
+    .slice(1)
+    .filter((r) => r[0] && String(r[1]).toLowerCase() === String(email).toLowerCase())
+    .map(rowToAddressObject)
+    .sort((a, b) => {
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+  return { ok: true, addresses };
+}
+
+// Deletes one saved address. Requires the owning email as a basic
+// ownership check (this is a public web app endpoint, so we don't
+// trust addressId alone). If the deleted address was the default and
+// other addresses remain, the most recently updated one is promoted
+// to default so checkout always has a sensible pre-selection.
+function handleDeleteAddress({ addressId, email }) {
+  if (!addressId || !email) return { ok: false, message: "addressId and email are required." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex(
+      (r, i) => i > 0 && String(r[0]) === String(addressId) && String(r[1]).toLowerCase() === String(email).toLowerCase()
+    );
+    if (rowIndex === -1) return { ok: false, message: "Address not found." };
+
+    const wasDefault = rows[rowIndex][12] === true || rows[rowIndex][12] === "TRUE";
+    sheet.deleteRow(rowIndex + 1);
+
+    if (wasDefault) {
+      const remaining = sheet
+        .getDataRange()
+        .getValues()
+        .map((r, i) => ({ r, i }))
+        .filter(({ r, i }) => i > 0 && String(r[1]).toLowerCase() === String(email).toLowerCase())
+        .sort((a, b) => new Date(b.r[14]) - new Date(a.r[14]));
+      if (remaining.length) sheet.getRange(remaining[0].i + 1, 13).setValue(true);
+    }
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Marks one address as the default for a customer and un-defaults
+// every other address they have saved.
+function handleSetDefaultAddress({ addressId, email }) {
+  if (!addressId || !email) return { ok: false, message: "addressId and email are required." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    let found = false;
+    rows.forEach((r, i) => {
+      if (i === 0) return;
+      if (String(r[1]).toLowerCase() !== String(email).toLowerCase()) return;
+      const isTarget = String(r[0]) === String(addressId);
+      if (isTarget) found = true;
+      sheet.getRange(i + 1, 13).setValue(isTarget);
+      if (isTarget) sheet.getRange(i + 1, 15).setValue(new Date()); // UpdatedAt
+    });
+    if (!found) return { ok: false, message: "Address not found." };
+    return { ok: true };
   } finally {
     lock.releaseLock();
   }

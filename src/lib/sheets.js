@@ -168,6 +168,12 @@ export const SheetsAPI = {
   listCallbackRequests: () => callSheetsApi("listCallbackRequests"), // admin: every request, newest first
   updateCallbackStatus: (data) => callSheetsApi("updateCallbackStatus", data), // admin: {requestId, status, adminNote?}
 
+  // ---- Addresses sheet (saved delivery addresses, multi-address book) ----
+  saveAddress: (data) => callSheetsApi("saveAddress", data), // {addressId?, email, label, name, phone, line1, line2?, city, state?, pincode, lat?, lng?, isDefault?}
+  getMyAddresses: (email) => callSheetsApi("getMyAddresses", { email }),
+  deleteAddress: (data) => callSheetsApi("deleteAddress", data), // {addressId, email}
+  setDefaultAddress: (data) => callSheetsApi("setDefaultAddress", data), // {addressId, email}
+
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),
   upsertProduct: (product) => callSheetsApi("upsertProduct", product),
