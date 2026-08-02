@@ -51,6 +51,25 @@
  *    up in Admin -> Error Logs (or directly in this tab) to see exactly
  *    what went wrong.
  *
+ *    Returns      | ReturnId | OrderId | Email | CustomerName | Phone
+ *                 | Type | Items(JSON) | Reason | ImageLinks(JSON)
+ *                 | VideoLink | Status | RequestedAt | ReviewedAt
+ *                 | AdminNote | RefundAmount | RefundStatus
+ *                 | RazorpayRefundId
+ *
+ *    NOTE ON RETURNS & EXCHANGES: customers can request a return or
+ *    exchange within 7 days of delivery, and MUST attach at least one
+ *    photo and one short video of the product as proof — these are
+ *    uploaded to a Google Drive folder ("neobonn Returns & Exchanges")
+ *    and the shareable links are stored in ImageLinks(JSON)/VideoLink.
+ *    "Type" is either "Return" or "Exchange". "Status" moves
+ *    Requested -> Approved/Rejected. When an admin APPROVES a "Return"
+ *    request in Admin -> Returns & Refunds, a refund is triggered
+ *    AUTOMATICALLY via the Razorpay Refunds API against the original
+ *    payment (see processAutomaticRefund) — no manual step in the
+ *    Razorpay dashboard needed. "Exchange" approvals don't move money;
+ *    the admin arranges the replacement shipment separately.
+ *
  *    IMPORTANT: these Products headers must be spelled EXACTLY as above
  *    (case-sensitive) in row 1 of the Products tab — the script looks
  *    up each column BY NAME, not by position, so you can safely
@@ -92,7 +111,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-01-order-emails-v2-idempotent";
+const CODE_VERSION = "2026-08-01-returns-exchanges-auto-refund-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -252,6 +271,16 @@ function doPost(e) {
         return jsonResponse(handleLogError(payload));
       case "listErrors":
         return jsonResponse(handleListErrors());
+      case "submitReturnRequest":
+        return jsonResponse(handleSubmitReturnRequest(payload));
+      case "getMyReturns":
+        return jsonResponse(handleGetMyReturns(payload));
+      case "listReturns":
+        return jsonResponse(handleListReturns());
+      case "reviewReturn":
+        return jsonResponse(handleReviewReturn(payload));
+      case "retryRefund":
+        return jsonResponse(handleRetryRefund(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -1011,4 +1040,351 @@ function handleListErrors() {
     }))
     .reverse();
   return { ok: true, errors };
+}
+
+// ---------------- Returns & Exchanges (with automatic refunds) ----------------
+// Flow: customer submits a request with photos + a video from their
+// Account page (within 7 days of delivery) -> shows up in
+// Admin -> Returns & Refunds -> admin reviews the media and clicks
+// Approve/Reject -> if it's a "Return" and gets approved, a refund to
+// the original payment method is triggered AUTOMATICALLY via the
+// Razorpay Refunds API. No manual refund step in the Razorpay
+// dashboard is needed.
+
+const RETURN_WINDOW_DAYS = 7;
+
+function getOrCreateReturnsFolder() {
+  const name = "neobonn Returns & Exchanges";
+  const existing = DriveApp.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(name);
+}
+
+// file: { name, mimeType, base64 } -> Drive share-link URL.
+// Requires the script to be authorized for Drive (see README) — the
+// first deploy/run after adding this feature will prompt for that.
+function uploadBase64FileToDrive(file, folder) {
+  const bytes = Utilities.base64Decode(file.base64);
+  const blob = Utilities.newBlob(bytes, file.mimeType || "application/octet-stream", file.name || "upload");
+  const driveFile = folder.createFile(blob);
+  driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return driveFile.getUrl();
+}
+
+function rowToReturnObject(r) {
+  return {
+    returnId: r[0],
+    orderId: r[1],
+    email: r[2],
+    customerName: r[3],
+    phone: r[4],
+    type: r[5], // "Return" | "Exchange"
+    items: safeParse(r[6], []),
+    reason: r[7],
+    imageLinks: safeParse(r[8], []),
+    videoLink: r[9],
+    status: r[10], // "Requested" | "Approved" | "Rejected"
+    requestedAt: r[11],
+    reviewedAt: r[12],
+    adminNote: r[13],
+    refundAmount: r[14],
+    refundStatus: r[15], // "Not Applicable" | "Pending" | "Processed" | "Failed"
+    razorpayRefundId: r[16],
+  };
+}
+
+// Customer-facing: submit a return or exchange request. Requires the
+// order to be Delivered, within the 7-day window, and at least one
+// photo + one video attached as proof.
+function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason, images, video }) {
+  if (!orderId || !email) return { ok: false, message: "Missing order or email." };
+  if (type !== "Return" && type !== "Exchange") {
+    return { ok: false, message: "Please choose Return or Exchange." };
+  }
+  if (!reason || !reason.trim()) return { ok: false, message: "Please tell us the reason." };
+  if (!images || !images.length) {
+    return { ok: false, message: "Please attach at least one photo of the product." };
+  }
+  if (!video) {
+    return { ok: false, message: "Please attach a short video of the product as proof." };
+  }
+
+  const ordersSheet = getSheet("Orders");
+  const orderRows = ordersSheet.getDataRange().getValues();
+  const orderRow = orderRows.find(
+    (r, i) => i > 0 && String(r[0]) === String(orderId) && String(r[3]).toLowerCase() === String(email).toLowerCase()
+  );
+  if (!orderRow) return { ok: false, message: "We couldn't find that order under this email." };
+  const order = rowToOrderObject(orderRow);
+
+  if (order.trackingStatus !== "Delivered") {
+    return { ok: false, message: "Return/exchange can only be requested once the order has been delivered." };
+  }
+  const deliveredAt = order.stageTimestamps["Delivered"];
+  const daysSinceDelivery = deliveredAt ? (Date.now() - new Date(deliveredAt).getTime()) / (1000 * 60 * 60 * 24) : Infinity;
+  if (daysSinceDelivery > RETURN_WINDOW_DAYS) {
+    return { ok: false, message: `Sorry, the ${RETURN_WINDOW_DAYS}-day return/exchange window for this order has passed.` };
+  }
+
+  // One open request per order at a time.
+  const returnsSheet = getSheet("Returns");
+  const alreadyOpen = returnsSheet
+    .getDataRange()
+    .getValues()
+    .slice(1)
+    .some((r) => String(r[1]) === String(orderId) && r[10] === "Requested");
+  if (alreadyOpen) {
+    return { ok: false, message: "A return/exchange request is already pending for this order." };
+  }
+
+  const folder = getOrCreateReturnsFolder();
+  const imageLinks = images.slice(0, 4).map((img) => uploadBase64FileToDrive(img, folder));
+  const videoLink = uploadBase64FileToDrive(video, folder);
+
+  const returnId = "RET" + new Date().getTime();
+  const now = new Date();
+
+  returnsSheet.appendRow([
+    returnId,
+    orderId,
+    email,
+    order.customerName,
+    phone || order.phone,
+    type,
+    JSON.stringify(items && items.length ? items : order.items),
+    reason,
+    JSON.stringify(imageLinks),
+    videoLink,
+    "Requested",
+    now, // RequestedAt
+    "", // ReviewedAt
+    "", // AdminNote
+    "", // RefundAmount
+    type === "Return" ? "Pending" : "Not Applicable", // RefundStatus
+    "", // RazorpayRefundId
+  ]);
+
+  try {
+    MailApp.sendEmail(
+      email,
+      `We've received your ${type.toLowerCase()} request — ${returnId} | neobonn`,
+      `Hi ${order.customerName || "there"},\n\n` +
+        `We've received your ${type.toLowerCase()} request for order ${orderId}.\n\n` +
+        `Request ID: ${returnId}\nReason: ${reason}\n\n` +
+        `Our team will review the photos/video you submitted and get back to you shortly.\n\n` +
+        `— Team neobonn`
+    );
+  } catch (err) {
+    console.error("Return request confirmation email failed: " + err.message);
+  }
+
+  // Notify the store owner (the Google account this script is deployed
+  // under) so new requests don't sit unnoticed.
+  try {
+    MailApp.sendEmail(
+      Session.getEffectiveUser().getEmail(),
+      `New ${type.toLowerCase()} request — ${returnId}`,
+      `Order: ${orderId}\nCustomer: ${order.customerName} (${email})\nReason: ${reason}\n\n` +
+        `Review the photos/video and approve or reject it from Admin -> Returns & Refunds.`
+    );
+  } catch (err) {
+    console.error("Return request admin-notify email failed: " + err.message);
+  }
+
+  return { ok: true, returnId };
+}
+
+// Customer-facing: their own return/exchange history.
+function handleGetMyReturns({ email }) {
+  const rows = getSheet("Returns").getDataRange().getValues();
+  const returns = rows
+    .slice(1)
+    .filter((r) => r[0] && String(r[2]).toLowerCase() === String(email).toLowerCase())
+    .map(rowToReturnObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, returns };
+}
+
+// admin: every return/exchange request, newest first.
+function handleListReturns() {
+  const rows = getSheet("Returns").getDataRange().getValues();
+  const returns = rows
+    .slice(1)
+    .filter((r) => r[0])
+    .map(rowToReturnObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, returns };
+}
+
+// Refunds the value of the returned items (or the full order amount if
+// items weren't itemized) straight to the customer's original payment
+// method via the Razorpay Refunds API. This is what makes refunds
+// "automatic" — no manual step in the Razorpay dashboard.
+function processAutomaticRefund(orderId, items) {
+  try {
+    const ordersSheet = getSheet("Orders");
+    const orderRow = ordersSheet
+      .getDataRange()
+      .getValues()
+      .find((r, i) => i > 0 && String(r[0]) === String(orderId));
+    if (!orderRow) return { ok: false, message: "Original order not found — refund not processed." };
+
+    const paymentId = orderRow[11]; // RazorpayPaymentId column
+    if (!paymentId) return { ok: false, message: "No payment ID on this order — was it actually paid?" };
+
+    const props = PropertiesService.getScriptProperties();
+    const keyId = props.getProperty("RAZORPAY_KEY_ID");
+    const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+    if (!keyId || !keySecret) {
+      return { ok: false, message: "Razorpay is not configured (RAZORPAY_KEY_ID/SECRET missing in Script Properties)." };
+    }
+
+    const itemsTotal = (items || []).reduce(
+      (sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0),
+      0
+    );
+    const amount = itemsTotal > 0 ? itemsTotal : Number(orderRow[8]); // fallback: full order amount
+
+    const res = UrlFetchApp.fetch(`https://api.razorpay.com/v1/payments/${paymentId}/refund`, {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Basic " + Utilities.base64Encode(keyId + ":" + keySecret) },
+      payload: JSON.stringify({ amount: Math.round(amount * 100) }), // paise
+      muteHttpExceptions: true,
+    });
+    const refund = JSON.parse(res.getContentText());
+
+    if (!refund.id) {
+      const reason = (refund.error && refund.error.description) || "Unknown error from Razorpay.";
+      return { ok: false, message: "Refund failed: " + reason, amount };
+    }
+    return { ok: true, refundId: refund.id, amount };
+  } catch (err) {
+    return { ok: false, message: "Refund failed: " + err.message };
+  }
+}
+
+function sendReturnDecisionEmail(r) {
+  try {
+    if (!r || !r.email) return;
+    const isApproved = r.status === "Approved";
+    const subject = `Your ${r.type.toLowerCase()} request ${isApproved ? "was approved" : "was declined"} — ${r.returnId} | neobonn`;
+    const lines = [
+      `Hi ${r.customerName || "there"},`,
+      "",
+      `Your ${r.type.toLowerCase()} request (${r.returnId}) for order ${r.orderId} has been ${isApproved ? "approved" : "declined"}.`,
+    ];
+    if (r.adminNote) lines.push("", `Note from our team: ${r.adminNote}`);
+    if (isApproved && r.type === "Return") {
+      lines.push(
+        "",
+        r.refundStatus === "Processed"
+          ? `A refund of ₹${r.refundAmount} has been initiated to your original payment method and should reflect in 5-7 business days.`
+          : `We're processing your refund — you'll receive a confirmation once it's initiated.`
+      );
+    }
+    if (isApproved && r.type === "Exchange") {
+      lines.push("", "We'll be in touch shortly with details of your replacement shipment.");
+    }
+    lines.push("", "— Team neobonn");
+    MailApp.sendEmail(r.email, subject, lines.join("\n"));
+  } catch (err) {
+    console.error("sendReturnDecisionEmail failed: " + err.message);
+  }
+}
+
+// admin: approve or reject a request. Approving a "Return" AUTOMATICALLY
+// triggers the Razorpay refund above — that's the whole point of this
+// handler. Idempotent: a request already Approved/Rejected can't be
+// reviewed again (prevents a double-refund from a retried click).
+function handleReviewReturn({ returnId, decision, adminNote }) {
+  if (decision !== "approved" && decision !== "rejected") {
+    return { ok: false, message: "Invalid decision." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  let refundOutcome = null;
+  let earlyExit = null;
+  try {
+    const sheet = getSheet("Returns");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[0]) === String(returnId));
+    if (rowIndex === -1) {
+      earlyExit = { ok: false, message: "Return request not found." };
+      return;
+    }
+    const row = rows[rowIndex];
+    if (row[10] !== "Requested") {
+      earlyExit = { ok: false, message: `This request was already ${String(row[10]).toLowerCase()}.` };
+      return;
+    }
+
+    const now = new Date();
+    const type = row[5];
+    const orderId = row[1];
+
+    if (decision === "rejected") {
+      sheet.getRange(rowIndex + 1, 11).setValue("Rejected"); // Status
+      sheet.getRange(rowIndex + 1, 13).setValue(now); // ReviewedAt
+      sheet.getRange(rowIndex + 1, 14).setValue(adminNote || ""); // AdminNote
+      sheet.getRange(rowIndex + 1, 16).setValue("Not Applicable"); // RefundStatus
+    } else {
+      sheet.getRange(rowIndex + 1, 11).setValue("Approved");
+      sheet.getRange(rowIndex + 1, 13).setValue(now);
+      sheet.getRange(rowIndex + 1, 14).setValue(adminNote || "");
+
+      if (type === "Return") {
+        refundOutcome = processAutomaticRefund(orderId, safeParse(row[6], []));
+        sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || ""); // RefundAmount
+        sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed"); // RefundStatus
+        sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || ""); // RazorpayRefundId
+      } else {
+        sheet.getRange(rowIndex + 1, 16).setValue("Not Applicable");
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+
+  if (earlyExit) return earlyExit;
+
+  const updatedRow = getSheet("Returns")
+    .getDataRange()
+    .getValues()
+    .find((r) => String(r[0]) === String(returnId));
+  const returnRequest = updatedRow ? rowToReturnObject(updatedRow) : null;
+  if (returnRequest) sendReturnDecisionEmail(returnRequest);
+
+  return {
+    ok: true,
+    returnRequest,
+    refundError: refundOutcome && !refundOutcome.ok ? refundOutcome.message : undefined,
+  };
+}
+
+// admin: manually retry a refund that failed the first time (e.g. a
+// transient Razorpay API error) without re-reviewing the whole request.
+function handleRetryRefund({ returnId }) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Returns");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[0]) === String(returnId));
+    if (rowIndex === -1) return { ok: false, message: "Return request not found." };
+    const row = rows[rowIndex];
+    if (row[5] !== "Return") return { ok: false, message: "Only Return requests have refunds." };
+    if (row[10] !== "Approved") return { ok: false, message: "This request must be approved first." };
+    if (row[15] === "Processed") return { ok: false, message: "This refund was already processed." };
+
+    const refundOutcome = processAutomaticRefund(row[1], safeParse(row[6], []));
+    sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || "");
+    sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed");
+    sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || "");
+
+    return { ok: refundOutcome.ok, refund: refundOutcome, message: refundOutcome.ok ? undefined : refundOutcome.message };
+  } finally {
+    lock.releaseLock();
+  }
 }

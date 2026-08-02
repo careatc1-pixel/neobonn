@@ -119,6 +119,13 @@ export const SheetsAPI = {
   // to look up what a customer's trial ID actually means.
   listErrors: () => callSheetsApi("listErrors"),
 
+  // ---- Returns & Exchanges (7-day window, photo+video required) ----
+  submitReturnRequest: (data) => callSheetsApi("submitReturnRequest", data), // {orderId, email, phone, type, items, reason, images, video}
+  getMyReturns: (email) => callSheetsApi("getMyReturns", { email }), // customer's own return/exchange history
+  listReturns: () => callSheetsApi("listReturns"), // admin: every request, newest first
+  reviewReturn: (data) => callSheetsApi("reviewReturn", data), // admin: {returnId, decision: "approved"|"rejected", adminNote?} — approving a Return auto-refunds via Razorpay
+  retryRefund: (returnId) => callSheetsApi("retryRefund", { returnId }), // admin: retry a refund that failed the first time
+
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),
   upsertProduct: (product) => callSheetsApi("upsertProduct", product),

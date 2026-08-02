@@ -112,6 +112,15 @@ export default function AdminDashboard() {
   const [errorSearch, setErrorSearch] = useState("");
   const [expandedTrialId, setExpandedTrialId] = useState(null);
 
+  const [returns, setReturns] = useState([]);
+  const [returnsLoading, setReturnsLoading] = useState(false);
+  const [returnsLoaded, setReturnsLoaded] = useState(false);
+  const [returnsDemoMode, setReturnsDemoMode] = useState(false);
+  const [returnsError, setReturnsError] = useState("");
+  const [expandedReturnId, setExpandedReturnId] = useState(null);
+  const [returnActionId, setReturnActionId] = useState(null); // returnId currently being approved/rejected/retried
+  const [returnNoteDrafts, setReturnNoteDrafts] = useState({}); // { [returnId]: adminNote }
+
   useEffect(() => {
     (async () => {
       try {
@@ -181,6 +190,74 @@ export default function AdminDashboard() {
         (e.trialId || "").toLowerCase().includes(errorSearch.trim().toLowerCase())
       )
     : errorLogs;
+
+  const loadReturns = async () => {
+    setReturnsLoading(true);
+    setReturnsError("");
+    try {
+      const res = await SheetsAPI.listReturns();
+      if (res.demo) {
+        setReturnsDemoMode(true);
+      } else if (res.ok) {
+        setReturns(res.returns || []);
+      } else {
+        setReturnsError(res.message || "Couldn't load return requests.");
+      }
+    } catch (err) {
+      setReturnsError(err.message || "Couldn't load return requests.");
+    } finally {
+      setReturnsLoading(false);
+      setReturnsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "returns" && !returnsLoaded && !returnsLoading) {
+      loadReturns();
+    }
+  }, [tab, returnsLoaded, returnsLoading]);
+
+  const handleReviewReturn = async (returnId, decision) => {
+    setReturnActionId(returnId);
+    try {
+      const res = await SheetsAPI.reviewReturn({
+        returnId,
+        decision,
+        adminNote: returnNoteDrafts[returnId] || "",
+      });
+      if (res.ok) {
+        setReturns((prev) => prev.map((r) => (r.returnId === returnId ? res.returnRequest : r)));
+        if (res.refundError) {
+          setReturnsError(
+            `"${returnId}" was approved, but the automatic refund failed: ${res.refundError}. Use "Retry refund" below once resolved.`
+          );
+        }
+      } else {
+        setReturnsError(res.message || "Couldn't update this request.");
+      }
+    } catch (err) {
+      setReturnsError(err.message || "Couldn't update this request.");
+    } finally {
+      setReturnActionId(null);
+    }
+  };
+
+  const handleRetryRefund = async (returnId) => {
+    setReturnActionId(returnId);
+    try {
+      const res = await SheetsAPI.retryRefund(returnId);
+      if (res.refund) {
+        await loadReturns();
+      }
+      if (!res.ok) {
+        setReturnsError(res.message || res.refund?.message || "Refund retry failed.");
+      }
+    } catch (err) {
+      setReturnsError(err.message || "Refund retry failed.");
+    } finally {
+      setReturnActionId(null);
+    }
+  };
 
   const draftFor = (order) =>
     orderDrafts[order.orderId] || {
@@ -374,7 +451,13 @@ export default function AdminDashboard() {
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">
           Admin ·{" "}
-          {tab === "products" ? "Products" : tab === "orders" ? "Orders" : "Error Logs"}
+          {tab === "products"
+            ? "Products"
+            : tab === "orders"
+            ? "Orders"
+            : tab === "returns"
+            ? "Returns & Refunds"
+            : "Error Logs"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
           Logout
@@ -397,6 +480,14 @@ export default function AdminDashboard() {
           }`}
         >
           Orders &amp; Shipment Tracking
+        </button>
+        <button
+          onClick={() => setTab("returns")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "returns" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Returns &amp; Refunds
         </button>
         <button
           onClick={() => setTab("errors")}
@@ -732,6 +823,198 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {tab === "returns" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Review the photos/video the customer submitted, then Approve or
+            Reject. Approving a <strong>Return</strong> automatically refunds
+            the customer via Razorpay — no manual step needed. Approving an{" "}
+            <strong>Exchange</strong> doesn't move money; arrange the
+            replacement shipment separately.
+          </p>
+
+          {returnsDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so return requests
+              can't be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!returnsDemoMode && returnsError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {returnsError}
+              <button onClick={loadReturns} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!returnsDemoMode && (
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={loadReturns}
+                disabled={returnsLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {returnsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">{returns.length} total</span>
+            </div>
+          )}
+
+          {!returnsDemoMode && !returnsLoading && returns.length === 0 && !returnsError && (
+            <p className="mt-6 text-center text-sm text-[var(--color-charcoal)]/50">
+              No return or exchange requests yet.
+            </p>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {returns.map((r) => {
+              const isOpen = expandedReturnId === r.returnId;
+              const busy = returnActionId === r.returnId;
+              return (
+                <div key={r.returnId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{r.returnId}</p>
+                      <p className="text-sm text-[var(--color-charcoal)]/60">
+                        {r.type} · Order {r.orderId} · {r.customerName} ({r.email})
+                      </p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {r.requestedAt ? new Date(r.requestedAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          r.status === "Approved"
+                            ? "bg-green-100 text-green-700"
+                            : r.status === "Rejected"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {r.status}
+                      </span>
+                      {r.type === "Return" && r.status === "Approved" && (
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            r.refundStatus === "Processed"
+                              ? "bg-green-100 text-green-700"
+                              : r.refundStatus === "Failed"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          Refund: {r.refundStatus}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="mt-3 text-sm text-[var(--color-charcoal)]/70">{r.reason}</p>
+
+                  <button
+                    onClick={() => setExpandedReturnId(isOpen ? null : r.returnId)}
+                    className="mt-3 text-xs font-semibold text-[var(--color-forest-dark)] underline"
+                  >
+                    {isOpen ? "Hide details" : "View items, photos & video"}
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-3 border-t border-[var(--color-forest)]/10 pt-3">
+                      <div>
+                        <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Items</div>
+                        <ul className="mt-1 text-sm text-[var(--color-charcoal)]/70">
+                          {(r.items || []).map((it, i) => (
+                            <li key={i}>{it.name} × {it.qty}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Photos</div>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {(r.imageLinks || []).map((link, i) => (
+                            <a
+                              key={i}
+                              href={link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-[var(--color-forest)]/20 px-3 py-1 text-xs font-medium text-[var(--color-forest-dark)]"
+                            >
+                              Photo {i + 1}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                      {r.videoLink && (
+                        <div>
+                          <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Video</div>
+                          <a
+                            href={r.videoLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-block rounded-full border border-[var(--color-forest)]/20 px-3 py-1 text-xs font-medium text-[var(--color-forest-dark)]"
+                          >
+                            Watch video
+                          </a>
+                        </div>
+                      )}
+
+                      {r.status === "Requested" && (
+                        <div>
+                          <label className="text-xs font-semibold text-[var(--color-charcoal)]/60">
+                            Note (optional, included in the customer's email)
+                          </label>
+                          <textarea
+                            value={returnNoteDrafts[r.returnId] || ""}
+                            onChange={(e) =>
+                              setReturnNoteDrafts((prev) => ({ ...prev, [r.returnId]: e.target.value }))
+                            }
+                            rows={2}
+                            className="mt-1 w-full rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm"
+                          />
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => handleReviewReturn(r.returnId, "approved")}
+                              disabled={busy}
+                              className="rounded-full bg-[var(--color-forest-dark)] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {busy ? "Processing..." : "Approve"}
+                            </button>
+                            <button
+                              onClick={() => handleReviewReturn(r.returnId, "rejected")}
+                              disabled={busy}
+                              className="rounded-full border border-red-300 px-5 py-2 text-xs font-semibold text-red-700 disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {r.status === "Approved" && r.type === "Return" && r.refundStatus === "Failed" && (
+                        <button
+                          onClick={() => handleRetryRefund(r.returnId)}
+                          disabled={busy}
+                          className="rounded-full border border-[var(--color-forest)]/20 px-5 py-2 text-xs font-semibold text-[var(--color-forest-dark)] disabled:opacity-60"
+                        >
+                          {busy ? "Retrying..." : "Retry refund"}
+                        </button>
+                      )}
+
+                      {r.adminNote && (
+                        <p className="text-xs text-[var(--color-charcoal)]/60">Note: {r.adminNote}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -1,10 +1,34 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { Package, ChevronDown } from "lucide-react";
+import { Package, ChevronDown, RotateCcw } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
 import SEO from "../components/SEO";
 import OrderTimeline from "../components/OrderTimeline";
+import ReturnRequestModal from "../components/ReturnRequestModal";
+
+const RETURN_WINDOW_DAYS = 7;
+
+function isReturnEligible(order) {
+  if (order.trackingStatus !== "Delivered") return false;
+  const deliveredAt = order.stageTimestamps?.Delivered;
+  if (!deliveredAt) return false;
+  const daysSince = (Date.now() - new Date(deliveredAt).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSince <= RETURN_WINDOW_DAYS;
+}
+
+function ReturnStatusBadge({ status }) {
+  const styles = {
+    Requested: "bg-amber-100 text-amber-700",
+    Approved: "bg-green-100 text-green-700",
+    Rejected: "bg-red-100 text-red-700",
+  };
+  return (
+    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles[status] || "bg-gray-100 text-gray-700"}`}>
+      {status}
+    </span>
+  );
+}
 
 function StatusBadge({ status }) {
   const isPaid = (status || "").toLowerCase() === "paid";
@@ -48,6 +72,27 @@ export default function Account() {
   const [loadErr, setLoadErr] = useState("");
   const [expandedId, setExpandedId] = useState(null);
 
+  const [returns, setReturns] = useState([]);
+  const [returnsLoaded, setReturnsLoaded] = useState(false);
+  const [returnsDemoMode, setReturnsDemoMode] = useState(false);
+  const [returnModalOrder, setReturnModalOrder] = useState(null);
+
+  const loadReturns = async () => {
+    if (!user?.email) return;
+    try {
+      const res = await SheetsAPI.getMyReturns(user.email);
+      if (res.demo) {
+        setReturnsDemoMode(true);
+      } else if (res.ok) {
+        setReturns(res.returns || []);
+      }
+    } catch {
+      // non-fatal — the returns section just stays empty
+    } finally {
+      setReturnsLoaded(true);
+    }
+  };
+
   useEffect(() => {
     if (!user?.email) return;
     (async () => {
@@ -68,6 +113,7 @@ export default function Account() {
         setLoading(false);
       }
     })();
+    loadReturns();
   }, [user]);
 
   if (!user) return <Navigate to="/login" replace />;
@@ -159,6 +205,15 @@ export default function Account() {
                   <ChevronDown size={14} className={isOpen ? "rotate-180 transition-transform" : "transition-transform"} />
                 </button>
 
+                {isReturnEligible(order) && (
+                  <button
+                    onClick={() => setReturnModalOrder(order)}
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest)]/15 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
+                  >
+                    <RotateCcw size={14} /> Return / Exchange
+                  </button>
+                )}
+
                 {isOpen && (
                   <div className="mt-4 border-t border-[var(--color-forest)]/10 pt-4">
                     <OrderTimeline
@@ -175,6 +230,49 @@ export default function Account() {
           })}
         </div>
       </div>
+
+      {!returnsDemoMode && returnsLoaded && returns.length > 0 && (
+        <div className="mt-12">
+          <h2 className="font-display text-xl text-[var(--color-forest-dark)]">
+            My Returns &amp; Exchanges
+          </h2>
+          <div className="mt-4 space-y-3">
+            {returns.map((r) => (
+              <div key={r.returnId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{r.returnId}</p>
+                    <p className="text-sm text-[var(--color-charcoal)]/60">
+                      {r.type} · Order {r.orderId}
+                    </p>
+                  </div>
+                  <ReturnStatusBadge status={r.status} />
+                </div>
+                <p className="mt-2 text-sm text-[var(--color-charcoal)]/70">{r.reason}</p>
+                {r.status === "Approved" && r.type === "Return" && (
+                  <p className="mt-2 text-xs text-[var(--color-forest-dark)]">
+                    {r.refundStatus === "Processed"
+                      ? `Refund of ₹${r.refundAmount} initiated to your original payment method.`
+                      : "Your refund is being processed."}
+                  </p>
+                )}
+                {r.status === "Rejected" && r.adminNote && (
+                  <p className="mt-2 text-xs text-[var(--color-charcoal)]/60">Note: {r.adminNote}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {returnModalOrder && (
+        <ReturnRequestModal
+          order={returnModalOrder}
+          user={user}
+          onClose={() => setReturnModalOrder(null)}
+          onSubmitted={loadReturns}
+        />
+      )}
     </div>
   );
 }
