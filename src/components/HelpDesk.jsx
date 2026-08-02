@@ -197,17 +197,13 @@ export default function HelpDesk() {
 
   return (
     <>
-      {/* Floating launcher button */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Close help chat" : "Need help?"}
-        className="fixed bottom-5 right-5 z-[60] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-forest-dark)] text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
-      >
-        {open ? <X size={22} /> : <MessageCircle size={22} />}
-      </button>
+      {/* No site-wide floating launcher — this panel only opens when
+          triggered from the Account page ("Help & Support") or from
+          an individual order's "Need help with this order?" button
+          via the openHelpDesk() bus (see lib/helpDeskBus.js). */}
 
       {open && (
-        <div className="fixed bottom-24 right-5 z-[60] flex h-[70vh] max-h-[560px] w-[92vw] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] shadow-2xl">
+        <div className="fixed bottom-5 right-5 z-[60] flex h-[70vh] max-h-[560px] w-[92vw] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] shadow-2xl">
           {/* Header */}
           <div className="flex items-center justify-between bg-[var(--color-forest-dark)] px-4 py-3.5 text-white">
             <div>

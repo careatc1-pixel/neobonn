@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
   Package, ChevronDown, ChevronRight, RotateCcw, MessageCircle,
-  Heart, Gift, UserRound, ShoppingBag, MapPinned,
+  Heart, Gift, UserRound, ShoppingBag, MapPinned, Star,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
 import { SheetsAPI } from "../lib/sheets";
 import { openHelpDesk } from "../lib/helpDeskBus";
+import { COMPANY } from "../data/company";
 import SEO from "../components/SEO";
 import OrderTimeline from "../components/OrderTimeline";
 import ReturnRequestModal from "../components/ReturnRequestModal";
@@ -302,6 +303,17 @@ export default function Account() {
                   >
                     <RotateCcw size={14} /> Return / Exchange
                   </button>
+                )}
+
+                {order.trackingStatus === "Delivered" && (
+                  <a
+                    href={COMPANY.googleReviewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
+                  >
+                    <Star size={14} /> Loved it? Rate us on Google
+                  </a>
                 )}
 
                 <button
