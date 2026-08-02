@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MessageCircle, X, Phone, Send, Package, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
+import { onOpenHelpDesk } from "../lib/helpDeskBus";
 
 // Company WhatsApp Business number — kept here (not just in the backend)
 // so the "Chat on WhatsApp" button works instantly without a round trip.
@@ -75,6 +76,10 @@ export default function HelpDesk() {
       setTimeout(() => say("Is this about an order you placed, or something else?"), 350);
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Allow other parts of the app (e.g. the Account page's "Help &
+  // Support" card) to open this widget without prop-drilling.
+  useEffect(() => onOpenHelpDesk(() => setOpen(true)), []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });

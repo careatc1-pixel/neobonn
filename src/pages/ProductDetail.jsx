@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Heart } from "lucide-react";
 import { useProducts } from "../context/ProductsContext";
 import { useCart } from "../context/CartContext";
+import { useWishlist } from "../context/WishlistContext";
 import { SheetsAPI } from "../lib/sheets";
 import SEO, { SITE_URL } from "../components/SEO";
 
@@ -11,6 +12,7 @@ export default function ProductDetail() {
   const { getProductById, isOutOfStock, loading } = useProducts();
   const product = getProductById(id);
   const { addItem } = useCart();
+  const { isWishlisted, toggleWishlist } = useWishlist();
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
@@ -99,6 +101,16 @@ export default function ProductDetail() {
           </div>
           <h1 className="mt-2 font-display text-4xl text-[var(--color-forest-dark)]">
             {product.name}
+            <button
+              onClick={() => toggleWishlist(product)}
+              aria-label={isWishlisted(product.id) ? "Remove from wishlist" : "Add to wishlist"}
+              className="ml-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-forest)]/15 align-middle transition-transform hover:scale-110"
+            >
+              <Heart
+                size={17}
+                className={isWishlisted(product.id) ? "fill-red-500 text-red-500" : "text-[var(--color-charcoal)]/50"}
+              />
+            </button>
           </h1>
 
           {product.dermatologicallyApproved && (

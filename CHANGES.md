@@ -176,3 +176,38 @@ The number **9310035064** is hardcoded in two places — the chat widget
 if you ever change your business WhatsApp number, update it in both
 spots. This uses `wa.me` links (WhatsApp's own free deep-linking
 service) — no WhatsApp Business API subscription needed, and no cost.
+
+## 6. Redesigned: Account/Profile page (Zepto/Amazon-style layout)
+
+The `/account` page now matches the app-style profile layout you shared
+a screenshot of:
+
+- **Header**: avatar, name, phone number, Logout.
+- **3 quick-action cards**: "Your Orders", "Help & Support" (opens the
+  chat widget from anywhere on the page), "Your Wishlist".
+- **"Your Information" list**: Your Refunds, Your Wishlist, E-Gift
+  Cards, Help & Support — tapping a row jumps straight to that section
+  on the same page.
+- Everything below (Orders with live shipment tracking, Wishlist,
+  Returns/Refunds) is the same real, working data as before — just
+  reorganized to match the screenshot's structure.
+
+### What's genuinely new & working
+- **Wishlist** — tap the heart on any product card or product page to
+  save/unsave it. Fully working right now. It's stored the same way the
+  cart already is (per-account, on-device) — no new sheet/deployment
+  step needed. One trade-off worth knowing: like the cart, it doesn't
+  sync across different devices/browsers for the same account, since
+  there's no backend table for it. If you'd like it to sync across
+  devices too, that's a small follow-up (a `Wishlist` sheet + 2 backend
+  actions, same pattern as Returns) — just ask.
+
+### What's intentionally a placeholder, not faked
+- **"neobonn Gift Cards" / wallet balance** — shown in the screenshot as
+  a purple "Cash & Gift Card" banner with a real ₹ balance. Building
+  that for real means a proper credit ledger, redemption at checkout,
+  and an admin way to issue credit — i.e. it touches real money
+  handling. Rather than show a balance that doesn't actually work at
+  checkout (which would be actively misleading to customers), it's
+  marked **"Coming Soon"** for now. Happy to build the real version
+  whenever you're ready to scope it out.

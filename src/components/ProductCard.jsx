@@ -1,8 +1,11 @@
 import { Link } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Heart } from "lucide-react";
+import { useWishlist } from "../context/WishlistContext";
 
 export default function ProductCard({ product }) {
   const outOfStock = !product.comingSoon && Number(product.stock ?? 0) <= 0;
+  const { isWishlisted, toggleWishlist } = useWishlist();
+  const wishlisted = isWishlisted(product.id);
 
   return (
     <Link
@@ -20,6 +23,17 @@ export default function ProductCard({ product }) {
             outOfStock ? "grayscale" : ""
           }`}
         />
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleWishlist(product);
+          }}
+          aria-label={wishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow-sm transition-transform hover:scale-110"
+        >
+          <Heart size={15} className={wishlisted ? "fill-red-500 text-red-500" : "text-[var(--color-charcoal)]/50"} />
+        </button>
         {product.comingSoon && (
           <span className="absolute left-3 top-3 rounded-full bg-[var(--color-forest-dark)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">
             Coming Soon
