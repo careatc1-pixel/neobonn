@@ -6,8 +6,8 @@ export const COMPANY = {
   address: "Block B-2, House No. 239, Paschim Vihar, New Delhi - 110063",
   email: "Connect@atharvtechco.com",
   social: {
-    instagram: "#",
-    facebook: "#",
+    instagram: "https://www.instagram.com/neobonn_official/",
+    facebook: "https://www.facebook.com/profile.php?id=61592869466402",
   },
   // Deep-links straight to your Google Business Profile's "write a
   // review" screen, so a happy customer can post publicly in a couple
