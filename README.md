@@ -123,6 +123,21 @@ form), `src/lib/fileToBase64.js` (photo/video encoding + size limits),
 and `processAutomaticRefund` / `handleReviewReturn` in
 `google-apps-script/Code.gs`.
 
+### Sender name on customer emails
+
+Every customer-facing email (order confirmation, shipment updates,
+login/reset OTP, return confirmation, return approve/reject) is sent
+with the display name **"neobonn"** instead of the raw Gmail address —
+so customers see "neobonn" in their inbox, not
+`info.neobonn@gmail.com`.
+
+**Limitation to know:** this is a *display name*, not a hidden sender —
+the underlying Gmail address is still technically present in the email
+headers (visible if a customer clicks into "show details"). Fully
+replacing it everywhere requires sending from a custom-domain address
+(e.g. `orders@neobonn.com` via Google Workspace) or a transactional
+email service — not possible with a free personal Gmail account.
+
 ## 4. Get a Razorpay account (for real payments)
 
 Sign up at razorpay.com (India-based, supports UPI/cards/netbanking).

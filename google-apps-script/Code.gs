@@ -111,7 +111,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-01-returns-exchanges-auto-refund-v1";
+const CODE_VERSION = "2026-08-02-masked-sender-name-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -319,7 +319,7 @@ function sendOrderConfirmationEmail(order) {
       `Deliver to: ${order.address}, ${order.city} - ${order.pincode}\n\n` +
       `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}\n\n` +
       `— Team neobonn`;
-    MailApp.sendEmail(order.email, subject, body);
+    MailApp.sendEmail(order.email, subject, body, { name: "neobonn" });
     return { ok: true };
   } catch (err) {
     console.error("sendOrderConfirmationEmail failed: " + err.message);
@@ -350,7 +350,7 @@ function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
       "",
       `— Team neobonn`
     );
-    MailApp.sendEmail(order.email, subject, lines.join("\n"));
+    MailApp.sendEmail(order.email, subject, lines.join("\n"), { name: "neobonn" });
     return { ok: true };
   } catch (err) {
     console.error("sendOrderStatusEmail failed: " + err.message);
@@ -433,7 +433,7 @@ function handleSendOtp({ email, purpose }) {
     `This code is valid for 5 minutes. If you didn't request this, you can safely ignore this email.\n\n` +
     `— neobonn`;
 
-  MailApp.sendEmail(email, subject, body);
+  MailApp.sendEmail(email, subject, body, { name: "neobonn" });
   return { ok: true };
 }
 
@@ -1172,7 +1172,8 @@ function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason,
         `We've received your ${type.toLowerCase()} request for order ${orderId}.\n\n` +
         `Request ID: ${returnId}\nReason: ${reason}\n\n` +
         `Our team will review the photos/video you submitted and get back to you shortly.\n\n` +
-        `— Team neobonn`
+        `— Team neobonn`,
+      { name: "neobonn" }
     );
   } catch (err) {
     console.error("Return request confirmation email failed: " + err.message);
@@ -1287,7 +1288,7 @@ function sendReturnDecisionEmail(r) {
       lines.push("", "We'll be in touch shortly with details of your replacement shipment.");
     }
     lines.push("", "— Team neobonn");
-    MailApp.sendEmail(r.email, subject, lines.join("\n"));
+    MailApp.sendEmail(r.email, subject, lines.join("\n"), { name: "neobonn" });
   } catch (err) {
     console.error("sendReturnDecisionEmail failed: " + err.message);
   }
