@@ -4,6 +4,8 @@ import { LocateFixed, Loader2, Plus } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useAddresses } from "../context/AddressContext";
+import { useCampaign } from "../context/CampaignContext";
+import { discountedPrice } from "../lib/pricing";
 import { SheetsAPI } from "../lib/sheets";
 import { detectCurrentAddress } from "../lib/geolocation";
 import SEO from "../components/SEO";
@@ -25,7 +27,9 @@ export default function Checkout() {
   const { items, subtotal, clearCart } = useCart();
   const { user } = useAuth();
   const { addresses, defaultAddress, saveAddress } = useAddresses();
+  const { discountPercent } = useCampaign();
   const navigate = useNavigate();
+  const total = discountedPrice(subtotal, discountPercent); // display only — the backend recalculates the real charge from its own Products + Campaigns sheets
 
   // Which saved address (if any) is currently chosen for delivery.
   const [selectedAddressId, setSelectedAddressId] = useState(defaultAddress?.addressId || null);
@@ -123,7 +127,7 @@ export default function Checkout() {
       const orderRes = await SheetsAPI.placeOrder({
         items,
         customer: activeAddress,
-        amount: subtotal,
+        amount: total, // display hint only — Code.gs recomputes the real charge from Products + Campaigns, never trusts this
       });
 
       if (orderRes.demo) {
@@ -151,7 +155,7 @@ export default function Checkout() {
 
       const rzp = new window.Razorpay({
         key: razorpayKeyId,
-        amount: subtotal * 100,
+        amount: total * 100,
         currency: "INR",
         name: "neobonn",
         description: "Order payment",
@@ -284,9 +288,23 @@ export default function Checkout() {
             </label>
           )}
 
-          <div className="flex items-center justify-between border-t border-[var(--color-forest)]/10 pt-4">
-            <span className="font-display text-xl">Total</span>
-            <span className="font-display text-xl">₹{subtotal}</span>
+          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+            {discountPercent > 0 && (
+              <>
+                <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
+                  <span>Bag total</span>
+                  <span className="line-through">₹{subtotal}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                  <span>Discount ({discountPercent}% off)</span>
+                  <span>− ₹{subtotal - total}</span>
+                </div>
+              </>
+            )}
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-display text-xl">Total</span>
+              <span className="font-display text-xl">₹{total}</span>
+            </div>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -295,7 +313,7 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : `Pay ₹${subtotal}`}
+            {placing ? "Processing..." : `Pay ₹${total}`}
           </button>
         </form>
       )}
@@ -303,9 +321,23 @@ export default function Checkout() {
       {/* ---- Pay button when a saved address is selected (form above is hidden) ---- */}
       {user && addresses.length > 0 && !addingNew && (
         <div className="mt-6 space-y-4">
-          <div className="flex items-center justify-between border-t border-[var(--color-forest)]/10 pt-4">
-            <span className="font-display text-xl">Total</span>
-            <span className="font-display text-xl">₹{subtotal}</span>
+          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+            {discountPercent > 0 && (
+              <>
+                <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
+                  <span>Bag total</span>
+                  <span className="line-through">₹{subtotal}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                  <span>Discount ({discountPercent}% off)</span>
+                  <span>− ₹{subtotal - total}</span>
+                </div>
+              </>
+            )}
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-display text-xl">Total</span>
+              <span className="font-display text-xl">₹{total}</span>
+            </div>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -315,7 +347,7 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : `Pay ₹${subtotal}`}
+            {placing ? "Processing..." : `Pay ₹${total}`}
           </button>
         </div>
       )}

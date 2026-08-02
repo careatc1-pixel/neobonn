@@ -197,10 +197,21 @@ export default function HelpDesk() {
 
   return (
     <>
-      {/* No site-wide floating launcher — this panel only opens when
-          triggered from the Account page ("Help & Support") or from
-          an individual order's "Need help with this order?" button
-          via the openHelpDesk() bus (see lib/helpDeskBus.js). */}
+      {/* Floating launcher — visible on every storefront page (not just
+          /account). Account page's "Help & Support" entries call
+          openHelpDesk() directly and skip this button, but it's the only
+          way a guest or someone browsing Home/Products/Cart/etc. can
+          reach support at all. */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Need help? Chat with us"
+          className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 rounded-full bg-[var(--color-forest-dark)] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl transition-transform hover:scale-105"
+        >
+          <MessageCircle size={18} />
+          <span className="hidden sm:inline">Need help?</span>
+        </button>
+      )}
 
       {open && (
         <div className="fixed bottom-5 right-5 z-[60] flex h-[70vh] max-h-[560px] w-[92vw] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] shadow-2xl">

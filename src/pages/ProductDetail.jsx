@@ -4,6 +4,8 @@ import { ShieldCheck, Heart } from "lucide-react";
 import { useProducts } from "../context/ProductsContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
+import { useCampaign } from "../context/CampaignContext";
+import { discountedPrice } from "../lib/pricing";
 import { SheetsAPI } from "../lib/sheets";
 import SEO, { SITE_URL } from "../components/SEO";
 
@@ -13,6 +15,7 @@ export default function ProductDetail() {
   const product = getProductById(id);
   const { addItem } = useCart();
   const { isWishlisted, toggleWishlist } = useWishlist();
+  const { discountPercent } = useCampaign();
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
@@ -172,7 +175,18 @@ export default function ProductDetail() {
                   <span className="w-8 text-center">{qty}</span>
                   <button onClick={() => setQty((q) => Math.min(maxQty, q + 1))} className="px-4 py-2 text-lg">+</button>
                 </div>
-                <span className="font-display text-2xl text-[var(--color-forest-dark)]">₹{product.price}</span>
+                <span className="font-display text-2xl text-[var(--color-forest-dark)]">
+                  {discountPercent > 0 ? (
+                    <span className="flex items-baseline gap-2">
+                      ₹{discountedPrice(product.price, discountPercent)}
+                      <span className="text-base font-normal text-[var(--color-charcoal)]/40 line-through">
+                        ₹{product.price}
+                      </span>
+                    </span>
+                  ) : (
+                    `₹${product.price}`
+                  )}
+                </span>
               </div>
             )}
 

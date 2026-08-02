@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Leaf, Sparkles, ShieldCheck } from "lucide-react";
-import { products } from "../data/products";
+import { useProducts } from "../context/ProductsContext";
 import { posterSlides } from "../data/posters";
 import ProductCard from "../components/ProductCard";
 import PosterSlider from "../components/PosterSlider";
@@ -21,6 +21,7 @@ const organizationJsonLd = {
 };
 
 export default function Home() {
+  const { products } = useProducts();
   return (
     <div>
       <SEO

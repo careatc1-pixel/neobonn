@@ -78,6 +78,33 @@
  *                 | Line2 | City | State | Pincode | Lat | Lng
  *                 | IsDefault | CreatedAt | UpdatedAt
  *
+ *    Campaigns    | Id | Name | Active | DiscountPercent | HeroImage
+ *                 | HeroTitle | HeroSubtitle | StripText | CtaLink
+ *                 | CreatedAt | UpdatedAt
+ *
+ *    NOTE ON CAMPAIGNS (Admin -> Banners & Offers): lets you switch the
+ *    homepage banner + sitewide discount to match whatever's happening
+ *    right now (Diwali, Monsoon Sale, a new launch, nothing at all) —
+ *    no code changes, no redeploy. Only ONE campaign can be Active at a
+ *    time; marking one Active automatically turns the rest off
+ *    (handleUpsertCampaign does this). "DiscountPercent" (0-90) is
+ *    applied EVERYWHERE prices are shown (product cards, product page,
+ *    cart, checkout) and — critically — is recomputed from THIS sheet
+ *    on the server when an order is actually charged
+ *    (computeAuthoritativeAmount), never trusted from the browser, for
+ *    the same reason the order amount itself isn't trusted from the
+ *    browser (see SECURITY NOTE below). "HeroImage" is optional — paste
+ *    a public image URL (e.g. from Google Drive, sharing set to
+ *    "Anyone with the link") to replace the default hero design with
+ *    your own banner graphic; leave it blank to keep the built-in
+ *    design with your Hero Title/Subtitle text overlaid instead.
+ *    "StripText" is the thin announcement bar at the very top of every
+ *    page (e.g. "Flat 40% OFF — Diwali Sale, this week only"); leave it
+ *    blank to hide that strip. If no campaign is Active at all, both
+ *    the hero banner and the top strip are hidden automatically and
+ *    every price shown is the plain, undiscounted price — the site
+ *    never shows a sale that isn't actually live.
+ *
  *    NOTE ON SAVED ADDRESSES (multi-address "deliver here" book): one
  *    signed-in customer (matched by Email) can save several delivery
  *    addresses — e.g. Home, Work, Mom's place — and pick one at
@@ -327,6 +354,14 @@ function doPost(e) {
         return jsonResponse(handleDeleteAddress(payload));
       case "setDefaultAddress":
         return jsonResponse(handleSetDefaultAddress(payload));
+      case "getActiveCampaign":
+        return jsonResponse(handleGetActiveCampaign());
+      case "listCampaigns":
+        return jsonResponse(handleListCampaigns());
+      case "upsertCampaign":
+        return jsonResponse(handleUpsertCampaign(payload));
+      case "deleteCampaign":
+        return jsonResponse(handleDeleteCampaign(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -580,7 +615,33 @@ function handleEnquiry({ name, email, phone, message }) {
 
 // ---------------- Orders ----------------
 
-function handlePlaceOrder({ items, customer, amount }) {
+// Recomputes the order total from the *server's* Products sheet prices —
+// never trusts the amount the browser sends, since that request can be
+// edited (devtools, replayed/modified network calls) before it reaches
+// us. This is the one source of truth for what Razorpay actually charges
+// and what gets saved as the order's amount. Also applies whatever
+// discount the currently-Active campaign says (see getActiveDiscountPercent)
+// — again, from the sheet, never from the browser.
+function computeAuthoritativeAmount(items) {
+  const sheet = getSheet("Products");
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const priceCol = colMap["Price"];
+  let total = 0;
+  for (const item of items) {
+    const row = rows.find((r) => String(r[idCol]) === String(item.id));
+    // Unknown product id shouldn't be billable at whatever price the
+    // client claims — treat it as zero rather than trusting item.price.
+    const price = row ? Number(row[priceCol]) || 0 : 0;
+    total += price * Number(item.qty || 0);
+  }
+  const discountPercent = getActiveDiscountPercent();
+  if (discountPercent > 0) total = total * (1 - discountPercent / 100);
+  return Math.round(total * 100) / 100; // avoid floating-point cent dust
+}
+
+function handlePlaceOrder({ items, customer }) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -589,6 +650,13 @@ function handlePlaceOrder({ items, customer, amount }) {
     // sold out or doesn't have enough units left, so we never oversell.
     const stockError = checkStockAvailability(items);
     if (stockError) return { ok: false, message: stockError };
+
+    // ---- Price check: always charge what the Products sheet actually
+    // says, never whatever amount the browser happened to send.
+    const amount = computeAuthoritativeAmount(items);
+    if (amount <= 0) {
+      return { ok: false, message: "Could not calculate order total. Please refresh and try again." };
+    }
 
     const orderId = "ORD" + new Date().getTime();
 
@@ -1035,6 +1103,166 @@ function handleUpdateStock({ id, stock }) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------------- Campaigns (Admin -> Banners & Offers) ----------------
+// Header-based column lookup, same pattern as Products (see
+// getProductColumnMap above) — safe against reordered/extra columns.
+const CAMPAIGN_COLUMNS = [
+  "Id", "Name", "Active", "DiscountPercent", "HeroImage",
+  "HeroTitle", "HeroSubtitle", "StripText", "CtaLink", "CreatedAt", "UpdatedAt",
+];
+
+function getCampaignColumnMap(sheet) {
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const wanted = {};
+  CAMPAIGN_COLUMNS.forEach((col) => { wanted[normalizeHeaderText(col)] = col; });
+  const map = {};
+  header.forEach((h, i) => {
+    const norm = normalizeHeaderText(h);
+    if (norm && wanted[norm] && !(wanted[norm] in map)) map[wanted[norm]] = i;
+  });
+  CAMPAIGN_COLUMNS.forEach((col, i) => { if (!(col in map)) map[col] = i; });
+  return map;
+}
+
+function rowToCampaignObject(row, colMap) {
+  const val = (col) => row[colMap[col]];
+  return {
+    id: String(val("Id") || ""),
+    name: val("Name") || "",
+    active: val("Active") === true || val("Active") === "TRUE",
+    discountPercent: Math.max(0, Math.min(90, Number(val("DiscountPercent")) || 0)),
+    heroImage: val("HeroImage") || "",
+    heroTitle: val("HeroTitle") || "",
+    heroSubtitle: val("HeroSubtitle") || "",
+    stripText: val("StripText") || "",
+    ctaLink: val("CtaLink") || "/products",
+    createdAt: val("CreatedAt") || "",
+    updatedAt: val("UpdatedAt") || "",
+  };
+}
+
+function campaignToRowArray(c, colMap, existingRow) {
+  const row = existingRow ? existingRow.slice() : new Array(CAMPAIGN_COLUMNS.length).fill("");
+  const set = (col, value) => { if (col in colMap) row[colMap[col]] = value; };
+  set("Id", c.id);
+  set("Name", c.name);
+  set("Active", !!c.active);
+  set("DiscountPercent", Math.max(0, Math.min(90, Number(c.discountPercent) || 0)));
+  set("HeroImage", c.heroImage || "");
+  set("HeroTitle", c.heroTitle || "");
+  set("HeroSubtitle", c.heroSubtitle || "");
+  set("StripText", c.stripText || "");
+  set("CtaLink", c.ctaLink || "/products");
+  if (!existingRow) set("CreatedAt", new Date());
+  set("UpdatedAt", new Date());
+  return row;
+}
+
+// Public (no login needed) — read by every storefront page to decide
+// whether to show a hero banner / promo strip / discounted prices.
+// Never throws: if the Campaigns tab doesn't exist yet (or isn't set
+// up), the site should just behave as if no campaign is live, not break.
+function handleGetActiveCampaign() {
+  try {
+    const sheet = getSheet("Campaigns");
+    if (!sheet) return { ok: true, campaign: null };
+    const rows = sheet.getDataRange().getValues();
+    const colMap = getCampaignColumnMap(sheet);
+    const activeCol = colMap["Active"];
+    const active = rows.slice(1).find((r) => r[activeCol] === true || r[activeCol] === "TRUE");
+    return { ok: true, campaign: active ? rowToCampaignObject(active, colMap) : null };
+  } catch (err) {
+    return { ok: true, campaign: null };
+  }
+}
+
+// admin: every campaign (active or not), so the admin panel can list
+// past/draft occasions and let you flip which one is live.
+function handleListCampaigns() {
+  const sheet = getSheet("Campaigns");
+  if (!sheet) {
+    return {
+      ok: false,
+      message:
+        'The "Campaigns" sheet tab doesn\'t exist yet. Add it — see the ' +
+        "setup comment at the top of Code.gs for the exact header row.",
+    };
+  }
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getCampaignColumnMap(sheet);
+  const campaigns = rows
+    .slice(1)
+    .filter((r) => r.some((cell) => cell !== ""))
+    .map((r) => rowToCampaignObject(r, colMap))
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  return { ok: true, campaigns };
+}
+
+// admin: create or update one campaign. Marking a campaign Active
+// automatically deactivates every other campaign in the same call —
+// only one can ever be "live" at once, so the storefront never has to
+// guess which banner/discount to show.
+function handleUpsertCampaign(c) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Campaigns");
+    if (!sheet) return { ok: false, message: 'The "Campaigns" sheet tab doesn\'t exist yet.' };
+    const rows = sheet.getDataRange().getValues();
+    const colMap = getCampaignColumnMap(sheet);
+    const idCol = colMap["Id"];
+    const activeCol = colMap["Active"];
+
+    const id = c.id && String(c.id).trim() ? String(c.id).trim() : "CAMP" + new Date().getTime();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === id);
+    const rowData = campaignToRowArray(
+      { ...c, id },
+      colMap,
+      rowIndex > -1 ? rows[rowIndex] : null
+    );
+
+    if (rowIndex === -1) {
+      sheet.appendRow(rowData);
+    } else {
+      sheet.getRange(rowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
+    }
+
+    // If this campaign is now Active, switch every other row off.
+    if (c.active) {
+      const freshRows = sheet.getDataRange().getValues();
+      for (let i = 1; i < freshRows.length; i++) {
+        if (String(freshRows[i][idCol]) !== id && (freshRows[i][activeCol] === true || freshRows[i][activeCol] === "TRUE")) {
+          sheet.getRange(i + 1, activeCol + 1).setValue(false);
+        }
+      }
+    }
+
+    return handleListCampaigns();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleDeleteCampaign({ id }) {
+  const sheet = getSheet("Campaigns");
+  if (!sheet) return { ok: false, message: 'The "Campaigns" sheet tab doesn\'t exist yet.' };
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getCampaignColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(id));
+  if (rowIndex > -1) sheet.deleteRow(rowIndex + 1);
+  return handleListCampaigns();
+}
+
+// The single source of truth for "what discount is live right now" —
+// used by computeAuthoritativeAmount so checkout always charges
+// whatever the active campaign says, regardless of what the browser
+// sends. Never throws (same reasoning as handleGetActiveCampaign).
+function getActiveDiscountPercent() {
+  const res = handleGetActiveCampaign();
+  return res.campaign ? res.campaign.discountPercent : 0;
 }
 
 function safeParse(str, fallback) {

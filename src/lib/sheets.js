@@ -180,4 +180,10 @@ export const SheetsAPI = {
   deleteProduct: (id) => callSheetsApi("deleteProduct", { id }),
   updateStock: (id, stock) => callSheetsApi("updateStock", { id, stock }), // inventory manager
   bulkUpsertProducts: (products) => callSheetsApi("bulkUpsertProducts", { products }), // CSV import
+
+  // ---- Campaigns (Admin -> Banners & Offers: live banner + sitewide discount) ----
+  getActiveCampaign: () => callSheetsApi("getActiveCampaign"), // public — powers hero banner, promo strip, and discounted prices everywhere
+  listCampaigns: () => callSheetsApi("listCampaigns"), // admin: every campaign, most recently updated first
+  upsertCampaign: (campaign) => callSheetsApi("upsertCampaign", campaign), // admin: {id?, name, active, discountPercent, heroImage?, heroTitle?, heroSubtitle?, stripText?, ctaLink?}
+  deleteCampaign: (id) => callSheetsApi("deleteCampaign", { id }), // admin
 };

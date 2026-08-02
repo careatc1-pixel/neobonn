@@ -1,11 +1,16 @@
 import { Link } from "react-router-dom";
 import { ShieldCheck, Heart } from "lucide-react";
 import { useWishlist } from "../context/WishlistContext";
+import { useCampaign } from "../context/CampaignContext";
+import { discountedPrice } from "../lib/pricing";
 
 export default function ProductCard({ product }) {
   const outOfStock = !product.comingSoon && Number(product.stock ?? 0) <= 0;
   const { isWishlisted, toggleWishlist } = useWishlist();
   const wishlisted = isWishlisted(product.id);
+  const { discountPercent } = useCampaign();
+  const finalPrice = discountedPrice(product.price, discountPercent);
+  const hasDiscount = discountPercent > 0 && !product.comingSoon && !outOfStock;
 
   return (
     <Link
@@ -57,12 +62,21 @@ export default function ProductCard({ product }) {
         )}
 
         <div className="mt-3 flex items-center justify-between">
-          <span className="font-semibold text-[var(--color-charcoal)]">
-            {product.comingSoon
-              ? "Notify Me"
-              : outOfStock
-                ? "Out of Stock"
-                : `₹${product.price}`}
+          <span className="flex items-baseline gap-1.5 font-semibold text-[var(--color-charcoal)]">
+            {product.comingSoon ? (
+              "Notify Me"
+            ) : outOfStock ? (
+              "Out of Stock"
+            ) : hasDiscount ? (
+              <>
+                <span>₹{finalPrice}</span>
+                <span className="text-xs font-normal text-[var(--color-charcoal)]/40 line-through">
+                  ₹{product.price}
+                </span>
+              </>
+            ) : (
+              `₹${product.price}`
+            )}
           </span>
           <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-gold)] opacity-0 transition-opacity group-hover:opacity-100">
             View →
