@@ -7,7 +7,6 @@ import Footer from "./components/Footer";
 import AnalyticsRouteTracker from "./components/AnalyticsRouteTracker";
 import ErrorBoundary from "./components/ErrorBoundary";
 import HelpDesk from "./components/HelpDesk";
-import OopsScreen from "./components/OopsScreen";
 
 import Home from "./pages/Home";
 import Products from "./pages/Products";
@@ -73,7 +72,6 @@ export default function App() {
                 </RequireAdmin>
               }
             />
-            <Route path="*" element={<AdminLogin />} />
           </Routes>
         </ErrorBoundary>
       </div>
@@ -109,17 +107,6 @@ export default function App() {
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="/refund-policy" element={<RefundPolicy />} />
             <Route path="/terms-of-service" element={<TermsOfService />} />
-            <Route
-              path="*"
-              element={
-                <OopsScreen
-                  title="Page not found"
-                  message="The page you're looking for doesn't exist or may have moved."
-                  showHomeLink
-                  fullScreen={false}
-                />
-              }
-            />
           </Routes>
         </ErrorBoundary>
       </main>

@@ -1,38 +1,9 @@
 import { Link } from "react-router-dom";
 import { Leaf, ShieldCheck, Sparkles } from "lucide-react";
-import { useCampaign } from "../context/CampaignContext";
 
-// Big seasonal banner for the top of the homepage — fully driven by
-// whichever campaign is Active in Admin -> Banners & Offers. Renders
-// nothing at all if no campaign is live, so the homepage never
-// advertises a sale that isn't real.
+// Big seasonal sale banner for the top of the homepage.
+// New section only — does not touch or replace the existing brand Hero below it.
 export default function SaleHeroBanner() {
-  const { campaign } = useCampaign();
-  if (!campaign) return null;
-
-  const { heroImage, heroTitle, heroSubtitle, discountPercent, ctaLink, name } = campaign;
-
-  // A custom banner graphic (pasted by the admin) fully replaces the
-  // built-in design — simplest path for someone who already designs
-  // their own promo graphics (Canva, Photoshop, etc.).
-  if (heroImage) {
-    return (
-      <section className="mx-auto max-w-[1600px] px-5 pt-6 md:px-8 md:pt-10">
-        <Link
-          to={ctaLink || "/products"}
-          className="block overflow-hidden rounded-3xl shadow-xl shadow-black/10 transition-transform hover:scale-[1.005]"
-        >
-          <img
-            src={heroImage}
-            alt={heroTitle || name || "Current offer"}
-            className="h-auto w-full object-cover"
-            loading="eager"
-          />
-        </Link>
-      </section>
-    );
-  }
-
   return (
     <section className="mx-auto max-w-[1600px] px-5 pt-6 md:px-8 md:pt-10">
       <div className="relative overflow-hidden rounded-3xl bg-[var(--color-forest-dark)] shadow-xl shadow-black/10">
@@ -98,18 +69,21 @@ export default function SaleHeroBanner() {
           {/* Copy */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--color-gold-light)]">
-              {name || "Limited Time"}
+              Limited Time · This Week Only
             </p>
             <h1 className="mt-4 font-display text-4xl leading-[1.08] text-white sm:text-5xl md:text-[3.2rem]">
-              {heroTitle || name || "A special offer, just for you"}
+              The Monsoon
+              <br />
+              Botanical <span className="text-[var(--color-gold-light)]">Sale</span>
             </h1>
-            {heroSubtitle && (
-              <p className="mt-5 max-w-md text-white/70">{heroSubtitle}</p>
-            )}
+            <p className="mt-5 max-w-md text-white/70">
+              Flat 40% off every handcrafted soap, serum &amp; ritual — real
+              botanicals, no harsh chemicals, no shortcuts.
+            </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Link
-                to={ctaLink || "/products"}
+                to="/products"
                 className="rounded-full bg-[var(--color-gold)] px-8 py-3 text-sm font-semibold text-[var(--color-forest-dark)] transition-transform hover:scale-[1.03]"
               >
                 Shop the Sale
@@ -160,30 +134,26 @@ export default function SaleHeroBanner() {
               loading="lazy"
             />
 
-            {/* Wax-seal style discount badge — only shown when this
-                campaign actually carries a discount; a campaign can
-                also just be an announcement (0% off) */}
-            {discountPercent > 0 && (
-              <div className="absolute -right-2 bottom-0 -rotate-[10deg] sm:right-2 md:-right-4">
-                <svg width="112" height="112" viewBox="0 0 112 112" aria-hidden="true">
-                  <circle
-                    cx="56"
-                    cy="56"
-                    r="52"
-                    fill="var(--color-gold)"
-                    stroke="var(--color-gold-light)"
-                    strokeWidth="2"
-                    strokeDasharray="4 3"
-                  />
-                  <circle cx="56" cy="56" r="44" fill="none" stroke="var(--color-forest-dark)" strokeWidth="1" opacity="0.35" />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-[var(--color-forest-dark)]">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Flat</span>
-                  <span className="font-display text-2xl leading-none">{discountPercent}%</span>
-                  <span className="text-[9px] font-bold uppercase tracking-widest">Off</span>
-                </div>
+            {/* Wax-seal style discount badge */}
+            <div className="absolute -right-2 bottom-0 -rotate-[10deg] sm:right-2 md:-right-4">
+              <svg width="112" height="112" viewBox="0 0 112 112" aria-hidden="true">
+                <circle
+                  cx="56"
+                  cy="56"
+                  r="52"
+                  fill="var(--color-gold)"
+                  stroke="var(--color-gold-light)"
+                  strokeWidth="2"
+                  strokeDasharray="4 3"
+                />
+                <circle cx="56" cy="56" r="44" fill="none" stroke="var(--color-forest-dark)" strokeWidth="1" opacity="0.35" />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-[var(--color-forest-dark)]">
+                <span className="text-[10px] font-bold uppercase tracking-widest">Flat</span>
+                <span className="font-display text-2xl leading-none">40%</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest">Off</span>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>

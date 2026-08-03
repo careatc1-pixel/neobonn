@@ -44,15 +44,11 @@ Step 3 fixes.
 ## 3. Connect the Google Sheets backend (free, no server)
 
 1. Create a new Google Sheet, name it `Neobonn Database`.
-2. Add these tabs, exactly named: `Users`, `Enquiries`, `Orders`,
-   `Products`, `Errors`, `Returns`, `CallbackRequests`, `Addresses`,
-   `Campaigns` — with the header columns listed at the top of
+2. Add 6 tabs exactly named: `Users`, `Enquiries`, `Orders`, `Products`,
+   `Errors`, `Returns` — with the header columns listed at the top of
    `google-apps-script/Code.gs`.
    (`Errors` powers the "Oops" screen, `Returns` powers Return/Exchange
-   requests + automatic refunds, `CallbackRequests` powers the Help
-   Desk chat widget, `Addresses` powers saved delivery addresses, and
-   `Campaigns` powers Admin -> Banners & Offers — see below and the
-   setup comment in `Code.gs` for exact headers.)
+   requests + automatic refunds — see below.)
 3. In the Sheet: **Extensions -> Apps Script**. Delete the placeholder
    code and paste in the entire contents of `google-apps-script/Code.gs`.
 4. In the Apps Script editor: **Project Settings (gear icon) -> Script
@@ -126,40 +122,6 @@ form), `src/lib/fileToBase64.js` (photo/video encoding + size limits),
 `src/pages/admin/AdminDashboard.jsx` (Returns & Refunds tab),
 and `processAutomaticRefund` / `handleReviewReturn` in
 `google-apps-script/Code.gs`.
-
-### Banners & Offers (live seasonal campaigns)
-
-**Admin -> Banners & Offers** lets you switch the homepage banner and
-a sitewide discount to match whatever's happening right now — Diwali,
-a Monsoon Sale, a new product launch, or nothing at all — with no code
-changes or redeploy.
-
-- Create a campaign: a name (internal label), a discount percentage
-  (0 for an announcement-only banner with no discount), a top-strip
-  message, and either a hero title/subtitle or a fully custom hero
-  image URL.
-- Click **Make Live** on one campaign to put it live — this
-  automatically takes down whichever campaign was live before, so only
-  one is ever active.
-- When a campaign is live: the hero banner and top strip appear on the
-  storefront, and every price (product cards, product page, cart,
-  checkout) shows the discounted price with the original struck
-  through. The amount actually charged at checkout is independently
-  recalculated on the server from this same campaign — never trusted
-  from the browser.
-- When nothing is live: both banners are hidden and every price is the
-  plain price. The site never shows a sale that isn't real.
-
-**One-time setup:** add a `Campaigns` tab to your Google Sheet — see
-the header row listed in the setup comment at the top of
-`google-apps-script/Code.gs`. If you skip this, the site works exactly
-as before (no banner, no discount) — nothing else breaks.
-
-Relevant files: `src/context/CampaignContext.jsx`,
-`src/components/SaleHeroBanner.jsx` and `PromoBanner.jsx`,
-`src/lib/pricing.js`, `src/pages/admin/AdminDashboard.jsx` (Banners &
-Offers tab), and `handleGetActiveCampaign` / `handleUpsertCampaign` /
-`computeAuthoritativeAmount` in `google-apps-script/Code.gs`.
 
 ### Sender name on customer emails
 

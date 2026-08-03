@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { MessageCircle, X, Phone, Send, Package, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
-import { onOpenHelpDesk } from "../lib/helpDeskBus";
 
 // Company WhatsApp Business number — kept here (not just in the backend)
 // so the "Chat on WhatsApp" button works instantly without a round trip.
@@ -76,10 +75,6 @@ export default function HelpDesk() {
       setTimeout(() => say("Is this about an order you placed, or something else?"), 350);
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Allow other parts of the app (e.g. the Account page's "Help &
-  // Support" card) to open this widget without prop-drilling.
-  useEffect(() => onOpenHelpDesk(() => setOpen(true)), []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -197,24 +192,17 @@ export default function HelpDesk() {
 
   return (
     <>
-      {/* Floating launcher — visible on every storefront page (not just
-          /account). Account page's "Help & Support" entries call
-          openHelpDesk() directly and skip this button, but it's the only
-          way a guest or someone browsing Home/Products/Cart/etc. can
-          reach support at all. */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          aria-label="Need help? Chat with us"
-          className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 rounded-full bg-[var(--color-forest-dark)] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl transition-transform hover:scale-105"
-        >
-          <MessageCircle size={18} />
-          <span className="hidden sm:inline">Need help?</span>
-        </button>
-      )}
+      {/* Floating launcher button */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Close help chat" : "Need help?"}
+        className="fixed bottom-5 right-5 z-[60] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-forest-dark)] text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+      >
+        {open ? <X size={22} /> : <MessageCircle size={22} />}
+      </button>
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-[60] flex h-[70vh] max-h-[560px] w-[92vw] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] shadow-2xl">
+        <div className="fixed bottom-24 right-5 z-[60] flex h-[70vh] max-h-[560px] w-[92vw] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-[var(--color-cream-deep)] shadow-2xl">
           {/* Header */}
           <div className="flex items-center justify-between bg-[var(--color-forest-dark)] px-4 py-3.5 text-white">
             <div>
