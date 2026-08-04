@@ -132,3 +132,47 @@ silently.
 No existing order data is lost or changed by this update — the new
 columns are simply blank for older orders until you next update their
 status.
+
+## 5. Added: Help Desk — chat widget + callback requests (Amazon/Flipkart-style)
+
+### What's new
+- A floating **"Need help?" chat bubble** now appears bottom-right on
+  every storefront page (not on the admin panel). It's a guided
+  assistant — not a generative-AI model (that would need a paid API,
+  and this whole system is built to stay free) — but it walks the
+  customer through the same flow those apps use:
+  1. "Is this about an order?" → if logged in, their recent orders are
+     pulled in automatically to pick from (or they can type an Order ID).
+  2. "What's it about?" → quick-reply buttons (delivery delay, wrong
+     item, refund, payment issue, product question, other).
+  3. Two ways to reach you:
+     - **Chat on WhatsApp** — opens `wa.me` straight to your business
+       number (**9310035064**) with the order ID + query pre-filled in
+       the message, so you see full context immediately.
+     - **Request a callback** — customer leaves their phone number,
+       which lands in a new **Admin → Help Desk** tab. You get an
+       instant email notification (free, via MailApp) the moment a
+       request comes in.
+- **Admin → Help Desk** tab: every callback request, with one-tap
+  **Call** / **WhatsApp customer** buttons (dials or opens WhatsApp
+  straight to *their* number), an internal note field, and a status
+  flow: Pending → Contacted → Resolved (or Cancelled).
+
+### Manual step required
+Add a new sheet tab named exactly **`CallbackRequests`** to your Google
+Sheet, with this header row (row 1, exact spelling):
+
+```
+RequestId | Name | Email | Phone | OrderId | QueryType | Message | PreferredTime | Status | RequestedAt | ResolvedAt | AdminNote
+```
+
+Then redeploy `Code.gs` as usual (Deploy → Manage deployments → pencil →
+New version → Deploy). No changes needed to any other sheet.
+
+### About the WhatsApp number
+The number **9310035064** is hardcoded in two places — the chat widget
+(`src/components/HelpDesk.jsx`) and the backend
+(`google-apps-script/Code.gs`, look for `HELPDESK_WHATSAPP_NUMBER`) — so
+if you ever change your business WhatsApp number, update it in both
+spots. This uses `wa.me` links (WhatsApp's own free deep-linking
+service) — no WhatsApp Business API subscription needed, and no cost.

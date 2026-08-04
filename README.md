@@ -44,9 +44,11 @@ Step 3 fixes.
 ## 3. Connect the Google Sheets backend (free, no server)
 
 1. Create a new Google Sheet, name it `Neobonn Database`.
-2. Add 4 tabs exactly named: `Users`, `Enquiries`, `Orders`, `Products`
-   — with the header columns listed at the top of
+2. Add 6 tabs exactly named: `Users`, `Enquiries`, `Orders`, `Products`,
+   `Errors`, `Returns` — with the header columns listed at the top of
    `google-apps-script/Code.gs`.
+   (`Errors` powers the "Oops" screen, `Returns` powers Return/Exchange
+   requests + automatic refunds — see below.)
 3. In the Sheet: **Extensions -> Apps Script**. Delete the placeholder
    code and paste in the entire contents of `google-apps-script/Code.gs`.
 4. In the Apps Script editor: **Project Settings (gear icon) -> Script
@@ -64,6 +66,77 @@ Step 3 fixes.
 8. Restart `npm run dev`. Signups, enquiries, orders and admin product
    edits will now write straight into your Google Sheet — visible in
    real time, filterable, exportable to Excel, no server cost.
+
+### Error handling — the "Oops" screen & trial IDs
+
+If anything breaks for a customer (a crash, a network hiccup, the
+backend being unreachable), they never see a raw error message — they
+see a friendly animated "Oops" screen with a short **trial ID** (e.g.
+`NB-8K2F41`). The real technical detail (message, stack trace, page,
+browser) is logged in the background to the `Errors` tab of your
+Google Sheet, keyed by that same trial ID.
+
+If a customer reports a trial ID:
+
+- Go to **Admin -> Error Logs**, paste the ID into the search box, and
+  you'll see exactly what happened — or
+- Open the `Errors` tab in your Google Sheet directly and search the
+  `TrialId` column.
+
+Relevant files: `src/components/OopsScreen.jsx` (the UI),
+`src/components/ErrorBoundary.jsx` and `GlobalErrorOverlay.jsx` (catch
+render crashes and uncaught/network errors respectively),
+`src/lib/errorReporting.js` (generates the trial ID and logs it).
+
+### Returns, Exchanges & automatic refunds
+
+From **Account -> My Orders**, once an order is marked `Delivered`,
+customers get a **Return / Exchange** button for **7 days**. The form
+requires a reason plus at least **one photo and one video** of the
+product as proof (this is enforced both in the UI and in the backend).
+
+- Requests land in the `Returns` sheet tab and in
+  **Admin -> Returns & Refunds**, where you can open the photos/video
+  and **Approve** or **Reject**.
+- Approving a **Return** automatically refunds the customer to their
+  original payment method via the **Razorpay Refunds API** — no manual
+  step in the Razorpay dashboard. If a refund attempt fails (e.g. a
+  transient Razorpay error), the request is marked `Failed` and a
+  **Retry refund** button appears.
+- Approving an **Exchange** doesn't move any money — arrange the
+  replacement shipment separately (e.g. by placing a new order for the
+  customer).
+- Customers get an email at each step (request received, approved/
+  rejected, refund initiated); you also get an email when a new
+  request comes in.
+
+**One-time setup:** photos/video are uploaded to a Google Drive folder
+named `neobonn Returns & Exchanges` (auto-created on first request).
+The very first time this runs, Google will prompt to authorize Drive
+access for the script — same process as the `testEmailSetup` step
+above (Apps Script editor -> run any function once -> Advanced -> Allow).
+
+Relevant files: `src/components/ReturnRequestModal.jsx` (the request
+form), `src/lib/fileToBase64.js` (photo/video encoding + size limits),
+`src/pages/Account.jsx` (eligibility + "My Returns" list),
+`src/pages/admin/AdminDashboard.jsx` (Returns & Refunds tab),
+and `processAutomaticRefund` / `handleReviewReturn` in
+`google-apps-script/Code.gs`.
+
+### Sender name on customer emails
+
+Every customer-facing email (order confirmation, shipment updates,
+login/reset OTP, return confirmation, return approve/reject) is sent
+with the display name **"neobonn"** instead of the raw Gmail address —
+so customers see "neobonn" in their inbox, not
+`info.neobonn@gmail.com`.
+
+**Limitation to know:** this is a *display name*, not a hidden sender —
+the underlying Gmail address is still technically present in the email
+headers (visible if a customer clicks into "show details"). Fully
+replacing it everywhere requires sending from a custom-domain address
+(e.g. `orders@neobonn.com` via Google Workspace) or a transactional
+email service — not possible with a free personal Gmail account.
 
 ## 4. Get a Razorpay account (for real payments)
 

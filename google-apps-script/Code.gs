@@ -40,6 +40,50 @@
  *                 | Image | ShortDescription | Description
  *                 | Ingredients(JSON) | Specifications(JSON) | Stock
  *
+ *    Errors       | TrialId | Timestamp | Message | Stack | Context
+ *                 | Url | UserAgent | Fatal
+ *
+ *    NOTE ON THE ERRORS SHEET: the storefront never shows customers a
+ *    raw error message — instead it shows a friendly "Oops" screen with
+ *    a short trial ID (e.g. "NB-8K2F41"). The real technical detail
+ *    (message, stack trace, page URL, browser) is written here, keyed
+ *    by that same trial ID. If a customer reports a trial ID, look it
+ *    up in Admin -> Error Logs (or directly in this tab) to see exactly
+ *    what went wrong.
+ *
+ *    Returns      | ReturnId | OrderId | Email | CustomerName | Phone
+ *                 | Type | Items(JSON) | Reason | ImageLinks(JSON)
+ *                 | VideoLink | Status | RequestedAt | ReviewedAt
+ *                 | AdminNote | RefundAmount | RefundStatus
+ *                 | RazorpayRefundId
+ *
+ *    NOTE ON RETURNS & EXCHANGES: customers can request a return or
+ *    exchange within 7 days of delivery, and MUST attach at least one
+ *    photo and one short video of the product as proof — these are
+ *    uploaded to a Google Drive folder ("neobonn Returns & Exchanges")
+ *    and the shareable links are stored in ImageLinks(JSON)/VideoLink.
+ *    "Type" is either "Return" or "Exchange". "Status" moves
+ *    Requested -> Approved/Rejected. When an admin APPROVES a "Return"
+ *    request in Admin -> Returns & Refunds, a refund is triggered
+ *    AUTOMATICALLY via the Razorpay Refunds API against the original
+ *    payment (see processAutomaticRefund) — no manual step in the
+ *    Razorpay dashboard needed. "Exchange" approvals don't move money;
+ *    the admin arranges the replacement shipment separately.
+ *
+ *    CallbackRequests | RequestId | Name | Email | Phone | OrderId
+ *                 | QueryType | Message | PreferredTime | Status
+ *                 | RequestedAt | ResolvedAt | AdminNote
+ *
+ *    NOTE ON THE HELP DESK / CALLBACK REQUESTS: the storefront's chat
+ *    widget (bottom-right "Need help?" bubble) lets a customer pick an
+ *    order + describe their issue, then choose either "Chat on
+ *    WhatsApp" (opens a prefilled wa.me link to the business number) or
+ *    "Request a callback" (writes a row here). "Status" moves
+ *    Pending -> Contacted -> Resolved (or Cancelled), managed from
+ *    Admin -> Help Desk. A confirmation email goes to the customer (if
+ *    they gave one) and a notification email goes to the store owner
+ *    the moment a new request comes in, so nothing sits unnoticed.
+ *
  *    IMPORTANT: these Products headers must be spelled EXACTLY as above
  *    (case-sensitive) in row 1 of the Products tab — the script looks
  *    up each column BY NAME, not by position, so you can safely
@@ -81,7 +125,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-01-order-emails-v2-idempotent";
+const CODE_VERSION = "2026-08-02-helpdesk-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -237,6 +281,26 @@ function doPost(e) {
         return jsonResponse(handleUpdateStock(payload));
       case "bulkUpsertProducts":
         return jsonResponse(handleBulkUpsertProducts(payload));
+      case "logError":
+        return jsonResponse(handleLogError(payload));
+      case "listErrors":
+        return jsonResponse(handleListErrors());
+      case "submitReturnRequest":
+        return jsonResponse(handleSubmitReturnRequest(payload));
+      case "getMyReturns":
+        return jsonResponse(handleGetMyReturns(payload));
+      case "listReturns":
+        return jsonResponse(handleListReturns());
+      case "reviewReturn":
+        return jsonResponse(handleReviewReturn(payload));
+      case "retryRefund":
+        return jsonResponse(handleRetryRefund(payload));
+      case "requestCallback":
+        return jsonResponse(handleRequestCallback(payload));
+      case "listCallbackRequests":
+        return jsonResponse(handleListCallbackRequests());
+      case "updateCallbackStatus":
+        return jsonResponse(handleUpdateCallbackStatus(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -275,7 +339,7 @@ function sendOrderConfirmationEmail(order) {
       `Deliver to: ${order.address}, ${order.city} - ${order.pincode}\n\n` +
       `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}\n\n` +
       `— Team neobonn`;
-    MailApp.sendEmail(order.email, subject, body);
+    MailApp.sendEmail(order.email, subject, body, { name: "neobonn" });
     return { ok: true };
   } catch (err) {
     console.error("sendOrderConfirmationEmail failed: " + err.message);
@@ -306,7 +370,7 @@ function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
       "",
       `— Team neobonn`
     );
-    MailApp.sendEmail(order.email, subject, lines.join("\n"));
+    MailApp.sendEmail(order.email, subject, lines.join("\n"), { name: "neobonn" });
     return { ok: true };
   } catch (err) {
     console.error("sendOrderStatusEmail failed: " + err.message);
@@ -389,7 +453,7 @@ function handleSendOtp({ email, purpose }) {
     `This code is valid for 5 minutes. If you didn't request this, you can safely ignore this email.\n\n` +
     `— neobonn`;
 
-  MailApp.sendEmail(email, subject, body);
+  MailApp.sendEmail(email, subject, body, { name: "neobonn" });
   return { ok: true };
 }
 
@@ -952,5 +1016,520 @@ function safeParse(str, fallback) {
     return JSON.parse(str);
   } catch {
     return fallback;
+  }
+}
+
+// ---------------- Error log (trial IDs) ----------------
+// The storefront never shows a customer the raw error/stack — it shows
+// a friendly "Oops" screen with a short trial ID and sends the real
+// technical detail here in the background. See the Errors sheet columns
+// documented at the top of this file, and src/lib/errorReporting.js on
+// the frontend.
+
+function handleLogError({ trialId, message, stack, context, url, userAgent, fatal }) {
+  getSheet("Errors").appendRow([
+    trialId || "",
+    new Date(),
+    message || "",
+    stack || "",
+    context || "",
+    url || "",
+    userAgent || "",
+    !!fatal,
+  ]);
+  return { ok: true, trialId };
+}
+
+// admin: every logged error, newest first — lets you paste in a
+// customer's trial ID and instantly see what actually happened.
+function handleListErrors() {
+  const sheet = getSheet("Errors");
+  const rows = sheet.getDataRange().getValues();
+  const errors = rows
+    .slice(1)
+    .filter((r) => r[0]) // skip blank rows
+    .map((r) => ({
+      trialId: r[0],
+      timestamp: r[1],
+      message: r[2],
+      stack: r[3],
+      context: r[4],
+      url: r[5],
+      userAgent: r[6],
+      fatal: r[7],
+    }))
+    .reverse();
+  return { ok: true, errors };
+}
+
+// ---------------- Returns & Exchanges (with automatic refunds) ----------------
+// Flow: customer submits a request with photos + a video from their
+// Account page (within 7 days of delivery) -> shows up in
+// Admin -> Returns & Refunds -> admin reviews the media and clicks
+// Approve/Reject -> if it's a "Return" and gets approved, a refund to
+// the original payment method is triggered AUTOMATICALLY via the
+// Razorpay Refunds API. No manual refund step in the Razorpay
+// dashboard is needed.
+
+const RETURN_WINDOW_DAYS = 7;
+
+function getOrCreateReturnsFolder() {
+  const name = "neobonn Returns & Exchanges";
+  const existing = DriveApp.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(name);
+}
+
+// file: { name, mimeType, base64 } -> Drive share-link URL.
+// Requires the script to be authorized for Drive (see README) — the
+// first deploy/run after adding this feature will prompt for that.
+function uploadBase64FileToDrive(file, folder) {
+  const bytes = Utilities.base64Decode(file.base64);
+  const blob = Utilities.newBlob(bytes, file.mimeType || "application/octet-stream", file.name || "upload");
+  const driveFile = folder.createFile(blob);
+  driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return driveFile.getUrl();
+}
+
+function rowToReturnObject(r) {
+  return {
+    returnId: r[0],
+    orderId: r[1],
+    email: r[2],
+    customerName: r[3],
+    phone: r[4],
+    type: r[5], // "Return" | "Exchange"
+    items: safeParse(r[6], []),
+    reason: r[7],
+    imageLinks: safeParse(r[8], []),
+    videoLink: r[9],
+    status: r[10], // "Requested" | "Approved" | "Rejected"
+    requestedAt: r[11],
+    reviewedAt: r[12],
+    adminNote: r[13],
+    refundAmount: r[14],
+    refundStatus: r[15], // "Not Applicable" | "Pending" | "Processed" | "Failed"
+    razorpayRefundId: r[16],
+  };
+}
+
+// Customer-facing: submit a return or exchange request. Requires the
+// order to be Delivered, within the 7-day window, and at least one
+// photo + one video attached as proof.
+function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason, images, video }) {
+  if (!orderId || !email) return { ok: false, message: "Missing order or email." };
+  if (type !== "Return" && type !== "Exchange") {
+    return { ok: false, message: "Please choose Return or Exchange." };
+  }
+  if (!reason || !reason.trim()) return { ok: false, message: "Please tell us the reason." };
+  if (!images || !images.length) {
+    return { ok: false, message: "Please attach at least one photo of the product." };
+  }
+  if (!video) {
+    return { ok: false, message: "Please attach a short video of the product as proof." };
+  }
+
+  const ordersSheet = getSheet("Orders");
+  const orderRows = ordersSheet.getDataRange().getValues();
+  const orderRow = orderRows.find(
+    (r, i) => i > 0 && String(r[0]) === String(orderId) && String(r[3]).toLowerCase() === String(email).toLowerCase()
+  );
+  if (!orderRow) return { ok: false, message: "We couldn't find that order under this email." };
+  const order = rowToOrderObject(orderRow);
+
+  if (order.trackingStatus !== "Delivered") {
+    return { ok: false, message: "Return/exchange can only be requested once the order has been delivered." };
+  }
+  const deliveredAt = order.stageTimestamps["Delivered"];
+  const daysSinceDelivery = deliveredAt ? (Date.now() - new Date(deliveredAt).getTime()) / (1000 * 60 * 60 * 24) : Infinity;
+  if (daysSinceDelivery > RETURN_WINDOW_DAYS) {
+    return { ok: false, message: `Sorry, the ${RETURN_WINDOW_DAYS}-day return/exchange window for this order has passed.` };
+  }
+
+  // One open request per order at a time.
+  const returnsSheet = getSheet("Returns");
+  const alreadyOpen = returnsSheet
+    .getDataRange()
+    .getValues()
+    .slice(1)
+    .some((r) => String(r[1]) === String(orderId) && r[10] === "Requested");
+  if (alreadyOpen) {
+    return { ok: false, message: "A return/exchange request is already pending for this order." };
+  }
+
+  const folder = getOrCreateReturnsFolder();
+  const imageLinks = images.slice(0, 4).map((img) => uploadBase64FileToDrive(img, folder));
+  const videoLink = uploadBase64FileToDrive(video, folder);
+
+  const returnId = "RET" + new Date().getTime();
+  const now = new Date();
+
+  returnsSheet.appendRow([
+    returnId,
+    orderId,
+    email,
+    order.customerName,
+    phone || order.phone,
+    type,
+    JSON.stringify(items && items.length ? items : order.items),
+    reason,
+    JSON.stringify(imageLinks),
+    videoLink,
+    "Requested",
+    now, // RequestedAt
+    "", // ReviewedAt
+    "", // AdminNote
+    "", // RefundAmount
+    type === "Return" ? "Pending" : "Not Applicable", // RefundStatus
+    "", // RazorpayRefundId
+  ]);
+
+  try {
+    MailApp.sendEmail(
+      email,
+      `We've received your ${type.toLowerCase()} request — ${returnId} | neobonn`,
+      `Hi ${order.customerName || "there"},\n\n` +
+        `We've received your ${type.toLowerCase()} request for order ${orderId}.\n\n` +
+        `Request ID: ${returnId}\nReason: ${reason}\n\n` +
+        `Our team will review the photos/video you submitted and get back to you shortly.\n\n` +
+        `— Team neobonn`,
+      { name: "neobonn" }
+    );
+  } catch (err) {
+    console.error("Return request confirmation email failed: " + err.message);
+  }
+
+  // Notify the store owner (the Google account this script is deployed
+  // under) so new requests don't sit unnoticed.
+  try {
+    MailApp.sendEmail(
+      Session.getEffectiveUser().getEmail(),
+      `New ${type.toLowerCase()} request — ${returnId}`,
+      `Order: ${orderId}\nCustomer: ${order.customerName} (${email})\nReason: ${reason}\n\n` +
+        `Review the photos/video and approve or reject it from Admin -> Returns & Refunds.`
+    );
+  } catch (err) {
+    console.error("Return request admin-notify email failed: " + err.message);
+  }
+
+  return { ok: true, returnId };
+}
+
+// Customer-facing: their own return/exchange history.
+function handleGetMyReturns({ email }) {
+  const rows = getSheet("Returns").getDataRange().getValues();
+  const returns = rows
+    .slice(1)
+    .filter((r) => r[0] && String(r[2]).toLowerCase() === String(email).toLowerCase())
+    .map(rowToReturnObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, returns };
+}
+
+// admin: every return/exchange request, newest first.
+function handleListReturns() {
+  const rows = getSheet("Returns").getDataRange().getValues();
+  const returns = rows
+    .slice(1)
+    .filter((r) => r[0])
+    .map(rowToReturnObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, returns };
+}
+
+// Refunds the value of the returned items (or the full order amount if
+// items weren't itemized) straight to the customer's original payment
+// method via the Razorpay Refunds API. This is what makes refunds
+// "automatic" — no manual step in the Razorpay dashboard.
+function processAutomaticRefund(orderId, items) {
+  try {
+    const ordersSheet = getSheet("Orders");
+    const orderRow = ordersSheet
+      .getDataRange()
+      .getValues()
+      .find((r, i) => i > 0 && String(r[0]) === String(orderId));
+    if (!orderRow) return { ok: false, message: "Original order not found — refund not processed." };
+
+    const paymentId = orderRow[11]; // RazorpayPaymentId column
+    if (!paymentId) return { ok: false, message: "No payment ID on this order — was it actually paid?" };
+
+    const props = PropertiesService.getScriptProperties();
+    const keyId = props.getProperty("RAZORPAY_KEY_ID");
+    const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+    if (!keyId || !keySecret) {
+      return { ok: false, message: "Razorpay is not configured (RAZORPAY_KEY_ID/SECRET missing in Script Properties)." };
+    }
+
+    const itemsTotal = (items || []).reduce(
+      (sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0),
+      0
+    );
+    const amount = itemsTotal > 0 ? itemsTotal : Number(orderRow[8]); // fallback: full order amount
+
+    const res = UrlFetchApp.fetch(`https://api.razorpay.com/v1/payments/${paymentId}/refund`, {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Basic " + Utilities.base64Encode(keyId + ":" + keySecret) },
+      payload: JSON.stringify({ amount: Math.round(amount * 100) }), // paise
+      muteHttpExceptions: true,
+    });
+    const refund = JSON.parse(res.getContentText());
+
+    if (!refund.id) {
+      const reason = (refund.error && refund.error.description) || "Unknown error from Razorpay.";
+      return { ok: false, message: "Refund failed: " + reason, amount };
+    }
+    return { ok: true, refundId: refund.id, amount };
+  } catch (err) {
+    return { ok: false, message: "Refund failed: " + err.message };
+  }
+}
+
+function sendReturnDecisionEmail(r) {
+  try {
+    if (!r || !r.email) return;
+    const isApproved = r.status === "Approved";
+    const subject = `Your ${r.type.toLowerCase()} request ${isApproved ? "was approved" : "was declined"} — ${r.returnId} | neobonn`;
+    const lines = [
+      `Hi ${r.customerName || "there"},`,
+      "",
+      `Your ${r.type.toLowerCase()} request (${r.returnId}) for order ${r.orderId} has been ${isApproved ? "approved" : "declined"}.`,
+    ];
+    if (r.adminNote) lines.push("", `Note from our team: ${r.adminNote}`);
+    if (isApproved && r.type === "Return") {
+      lines.push(
+        "",
+        r.refundStatus === "Processed"
+          ? `A refund of ₹${r.refundAmount} has been initiated to your original payment method and should reflect in 5-7 business days.`
+          : `We're processing your refund — you'll receive a confirmation once it's initiated.`
+      );
+    }
+    if (isApproved && r.type === "Exchange") {
+      lines.push("", "We'll be in touch shortly with details of your replacement shipment.");
+    }
+    lines.push("", "— Team neobonn");
+    MailApp.sendEmail(r.email, subject, lines.join("\n"), { name: "neobonn" });
+  } catch (err) {
+    console.error("sendReturnDecisionEmail failed: " + err.message);
+  }
+}
+
+// admin: approve or reject a request. Approving a "Return" AUTOMATICALLY
+// triggers the Razorpay refund above — that's the whole point of this
+// handler. Idempotent: a request already Approved/Rejected can't be
+// reviewed again (prevents a double-refund from a retried click).
+function handleReviewReturn({ returnId, decision, adminNote }) {
+  if (decision !== "approved" && decision !== "rejected") {
+    return { ok: false, message: "Invalid decision." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  let refundOutcome = null;
+  let earlyExit = null;
+  try {
+    const sheet = getSheet("Returns");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[0]) === String(returnId));
+    if (rowIndex === -1) {
+      earlyExit = { ok: false, message: "Return request not found." };
+      return;
+    }
+    const row = rows[rowIndex];
+    if (row[10] !== "Requested") {
+      earlyExit = { ok: false, message: `This request was already ${String(row[10]).toLowerCase()}.` };
+      return;
+    }
+
+    const now = new Date();
+    const type = row[5];
+    const orderId = row[1];
+
+    if (decision === "rejected") {
+      sheet.getRange(rowIndex + 1, 11).setValue("Rejected"); // Status
+      sheet.getRange(rowIndex + 1, 13).setValue(now); // ReviewedAt
+      sheet.getRange(rowIndex + 1, 14).setValue(adminNote || ""); // AdminNote
+      sheet.getRange(rowIndex + 1, 16).setValue("Not Applicable"); // RefundStatus
+    } else {
+      sheet.getRange(rowIndex + 1, 11).setValue("Approved");
+      sheet.getRange(rowIndex + 1, 13).setValue(now);
+      sheet.getRange(rowIndex + 1, 14).setValue(adminNote || "");
+
+      if (type === "Return") {
+        refundOutcome = processAutomaticRefund(orderId, safeParse(row[6], []));
+        sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || ""); // RefundAmount
+        sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed"); // RefundStatus
+        sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || ""); // RazorpayRefundId
+      } else {
+        sheet.getRange(rowIndex + 1, 16).setValue("Not Applicable");
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+
+  if (earlyExit) return earlyExit;
+
+  const updatedRow = getSheet("Returns")
+    .getDataRange()
+    .getValues()
+    .find((r) => String(r[0]) === String(returnId));
+  const returnRequest = updatedRow ? rowToReturnObject(updatedRow) : null;
+  if (returnRequest) sendReturnDecisionEmail(returnRequest);
+
+  return {
+    ok: true,
+    returnRequest,
+    refundError: refundOutcome && !refundOutcome.ok ? refundOutcome.message : undefined,
+  };
+}
+
+// admin: manually retry a refund that failed the first time (e.g. a
+// transient Razorpay API error) without re-reviewing the whole request.
+function handleRetryRefund({ returnId }) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Returns");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[0]) === String(returnId));
+    if (rowIndex === -1) return { ok: false, message: "Return request not found." };
+    const row = rows[rowIndex];
+    if (row[5] !== "Return") return { ok: false, message: "Only Return requests have refunds." };
+    if (row[10] !== "Approved") return { ok: false, message: "This request must be approved first." };
+    if (row[15] === "Processed") return { ok: false, message: "This refund was already processed." };
+
+    const refundOutcome = processAutomaticRefund(row[1], safeParse(row[6], []));
+    sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || "");
+    sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed");
+    sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || "");
+
+    return { ok: refundOutcome.ok, refund: refundOutcome, message: refundOutcome.ok ? undefined : refundOutcome.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------- Help Desk / callback requests ----------------
+// Powers the storefront's "Need help?" chat widget: customer picks an
+// order + a query type, then either opens a prefilled WhatsApp chat to
+// the business number, or asks for a callback (which lands here).
+
+const HELPDESK_WHATSAPP_NUMBER = "919310035064"; // company WhatsApp Business number, with country code
+
+function rowToCallbackObject(r) {
+  return {
+    requestId: r[0],
+    name: r[1],
+    email: r[2],
+    phone: r[3],
+    orderId: r[4],
+    queryType: r[5],
+    message: r[6],
+    preferredTime: r[7],
+    status: r[8] || "Pending",
+    requestedAt: r[9],
+    resolvedAt: r[10],
+    adminNote: r[11],
+  };
+}
+
+// Customer-facing: submitted from the help desk widget's "Request a
+// callback" step.
+function handleRequestCallback({ name, phone, email, orderId, queryType, message, preferredTime }) {
+  if (!phone || !phone.trim()) return { ok: false, message: "Please share a phone number so we can call you back." };
+  if (!queryType) return { ok: false, message: "Please tell us what this is about." };
+
+  const sheet = getSheet("CallbackRequests");
+  const requestId = "CB" + new Date().getTime();
+  const now = new Date();
+
+  sheet.appendRow([
+    requestId,
+    name || "",
+    email || "",
+    phone.trim(),
+    orderId || "",
+    queryType,
+    message || "",
+    preferredTime || "",
+    "Pending",
+    now,
+    "", // ResolvedAt
+    "", // AdminNote
+  ]);
+
+  // Confirmation to the customer (best-effort — only if they gave an email).
+  if (email) {
+    try {
+      MailApp.sendEmail(
+        email,
+        `We've got your request — ${requestId} | neobonn`,
+        `Hi ${name || "there"},\n\n` +
+          `Thanks for reaching out! Our support team will call you back shortly on ${phone}.\n\n` +
+          `Request ID: ${requestId}\n` +
+          `About: ${queryType}${orderId ? ` (Order ${orderId})` : ""}\n` +
+          (message ? `Your message: ${message}\n\n` : "\n") +
+          `— Team neobonn`,
+        { name: "neobonn" }
+      );
+    } catch (err) {
+      console.error("Callback confirmation email failed: " + err.message);
+    }
+  }
+
+  // Notify the store owner so new requests don't sit unnoticed.
+  try {
+    MailApp.sendEmail(
+      Session.getEffectiveUser().getEmail(),
+      `New help desk request — ${requestId}`,
+      `Name: ${name || "(not given)"}\nPhone: ${phone}\nEmail: ${email || "(not given)"}\n` +
+        `Order: ${orderId || "(none specified)"}\nAbout: ${queryType}\n` +
+        (message ? `Message: ${message}\n\n` : "\n") +
+        `Reply from Admin -> Help Desk, or call/WhatsApp them directly.`
+    );
+  } catch (err) {
+    console.error("Callback admin-notify email failed: " + err.message);
+  }
+
+  return { ok: true, requestId, whatsappNumber: HELPDESK_WHATSAPP_NUMBER };
+}
+
+// admin: every help desk request, newest first.
+function handleListCallbackRequests() {
+  const rows = getSheet("CallbackRequests").getDataRange().getValues();
+  const requests = rows
+    .slice(1)
+    .filter((r) => r[0])
+    .map(rowToCallbackObject)
+    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  return { ok: true, requests, whatsappNumber: HELPDESK_WHATSAPP_NUMBER };
+}
+
+// admin: move a request through Pending -> Contacted -> Resolved (or
+// Cancelled), with an optional internal note.
+function handleUpdateCallbackStatus({ requestId, status, adminNote }) {
+  const VALID_STATUSES = ["Pending", "Contacted", "Resolved", "Cancelled"];
+  if (!requestId || !status) return { ok: false, message: "requestId and status are required." };
+  if (VALID_STATUSES.indexOf(status) === -1) return { ok: false, message: "Unknown status: " + status };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("CallbackRequests");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && r[0] === requestId);
+    if (rowIndex === -1) return { ok: false, message: "Request not found." };
+
+    sheet.getRange(rowIndex + 1, 9).setValue(status); // Status
+    if (status === "Resolved" || status === "Cancelled") {
+      sheet.getRange(rowIndex + 1, 11).setValue(new Date()); // ResolvedAt
+    }
+    if (adminNote !== undefined) sheet.getRange(rowIndex + 1, 12).setValue(adminNote); // AdminNote
+
+    const updated = rowToCallbackObject(sheet.getRange(rowIndex + 1, 1, 1, 12).getValues()[0]);
+    return { ok: true, request: updated };
+  } finally {
+    lock.releaseLock();
   }
 }

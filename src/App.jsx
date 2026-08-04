@@ -5,6 +5,8 @@ import PromoBanner from "./components/PromoBanner";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import AnalyticsRouteTracker from "./components/AnalyticsRouteTracker";
+import ErrorBoundary from "./components/ErrorBoundary";
+import HelpDesk from "./components/HelpDesk";
 
 import Home from "./pages/Home";
 import Products from "./pages/Products";
@@ -59,17 +61,19 @@ export default function App() {
   if (isAdminRoute) {
     return (
       <div className="flex min-h-screen flex-col">
-        <Routes>
-          <Route path={ADMIN_LOGIN_PATH} element={<AdminLogin />} />
-          <Route
-            path="/admin/dashboard"
-            element={
-              <RequireAdmin>
-                <AdminDashboard />
-              </RequireAdmin>
-            }
-          />
-        </Routes>
+        <ErrorBoundary key={location.pathname} context={`Admin page: ${location.pathname}`}>
+          <Routes>
+            <Route path={ADMIN_LOGIN_PATH} element={<AdminLogin />} />
+            <Route
+              path="/admin/dashboard"
+              element={
+                <RequireAdmin>
+                  <AdminDashboard />
+                </RequireAdmin>
+              }
+            />
+          </Routes>
+        </ErrorBoundary>
       </div>
     );
   }
@@ -80,27 +84,34 @@ export default function App() {
       <PromoBanner />
       <Navbar />
       <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/products/:id" element={<ProductDetail />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/login/customer" element={<Login />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/account" element={<Account />} />
-          <Route path="/cart" element={<Cart />} />
-          <Route path="/checkout" element={<Checkout />} />
-          <Route path="/order-success" element={<OrderSuccess />} />
-          <Route path="/track-order" element={<TrackOrder />} />
-          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-          <Route path="/refund-policy" element={<RefundPolicy />} />
-          <Route path="/terms-of-service" element={<TermsOfService />} />
-        </Routes>
+        {/* key={pathname} — remounts (resets) the boundary on every
+            navigation, so leaving a broken page automatically recovers
+            instead of staying stuck on the Oops screen. Navbar/Footer
+            stay outside this boundary, so "Go to Homepage" always works. */}
+        <ErrorBoundary key={location.pathname} context={`Page: ${location.pathname}`} fullScreen={false}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/products/:id" element={<ProductDetail />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/login/customer" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/account" element={<Account />} />
+            <Route path="/cart" element={<Cart />} />
+            <Route path="/checkout" element={<Checkout />} />
+            <Route path="/order-success" element={<OrderSuccess />} />
+            <Route path="/track-order" element={<TrackOrder />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/refund-policy" element={<RefundPolicy />} />
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
       <Footer />
+      <HelpDesk />
     </div>
   );
 }

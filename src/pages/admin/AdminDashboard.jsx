@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Papa from "papaparse";
 import { ChevronDown } from "lucide-react";
@@ -84,7 +84,7 @@ const emptyProduct = {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("products"); // "products" | "orders"
+  const [tab, setTab] = useState("products"); // "products" | "orders" | "errors"
   const [list, setList] = useState(defaultProducts);
   const [editing, setEditing] = useState(null); // product being edited, or null
   const [saving, setSaving] = useState(false);
@@ -103,6 +103,36 @@ export default function AdminDashboard() {
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderDrafts, setOrderDrafts] = useState({}); // { [orderId]: { status, carrier, trackingNumber, note } }
   const [orderSavingId, setOrderSavingId] = useState(null);
+  const [orderActionMsg, setOrderActionMsg] = useState({}); // { [orderId]: { type: "success"|"error", text } }
+
+  const [errorLogs, setErrorLogs] = useState([]);
+  const [errorLogsLoading, setErrorLogsLoading] = useState(false);
+  const [errorLogsLoaded, setErrorLogsLoaded] = useState(false);
+  const [errorLogsDemoMode, setErrorLogsDemoMode] = useState(false);
+  const [errorLogsError, setErrorLogsError] = useState("");
+  const [errorSearch, setErrorSearch] = useState("");
+  const [expandedTrialId, setExpandedTrialId] = useState(null);
+
+  const [returns, setReturns] = useState([]);
+  const [returnsLoading, setReturnsLoading] = useState(false);
+  const [returnsLoaded, setReturnsLoaded] = useState(false);
+  const [returnsDemoMode, setReturnsDemoMode] = useState(false);
+  const [returnsError, setReturnsError] = useState("");
+  const [expandedReturnId, setExpandedReturnId] = useState(null);
+  const [returnActionId, setReturnActionId] = useState(null); // returnId currently being approved/rejected/retried
+  const [returnNoteDrafts, setReturnNoteDrafts] = useState({}); // { [returnId]: adminNote }
+  const [returnActionMsg, setReturnActionMsg] = useState({}); // { [returnId]: { type: "success"|"error", text } }
+
+  // ---- Help Desk tab state ----
+  const [callbacks, setCallbacks] = useState([]);
+  const [callbacksLoading, setCallbacksLoading] = useState(false);
+  const [callbacksLoaded, setCallbacksLoaded] = useState(false);
+  const [callbacksDemoMode, setCallbacksDemoMode] = useState(false);
+  const [callbacksError, setCallbacksError] = useState("");
+  const [expandedCallbackId, setExpandedCallbackId] = useState(null);
+  const [callbackActionId, setCallbackActionId] = useState(null);
+  const [callbackNoteDrafts, setCallbackNoteDrafts] = useState({}); // { [requestId]: adminNote }
+  const [callbackActionMsg, setCallbackActionMsg] = useState({}); // { [requestId]: { type, text } }
 
   useEffect(() => {
     (async () => {
@@ -142,6 +172,183 @@ export default function AdminDashboard() {
     loadOrders();
   }, []);
 
+  const loadErrorLogs = async () => {
+    setErrorLogsLoading(true);
+    setErrorLogsError("");
+    try {
+      const res = await SheetsAPI.listErrors();
+      if (res.demo) {
+        setErrorLogsDemoMode(true);
+      } else if (res.ok) {
+        setErrorLogs(res.errors || []);
+      } else {
+        setErrorLogsError(res.message || "Couldn't load error logs.");
+      }
+    } catch (err) {
+      setErrorLogsError(err.message || "Couldn't load error logs.");
+    } finally {
+      setErrorLogsLoading(false);
+      setErrorLogsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "errors" && !errorLogsLoaded && !errorLogsLoading) {
+      loadErrorLogs();
+    }
+  }, [tab, errorLogsLoaded, errorLogsLoading]);
+
+  const filteredErrorLogs = errorSearch.trim()
+    ? errorLogs.filter((e) =>
+        (e.trialId || "").toLowerCase().includes(errorSearch.trim().toLowerCase())
+      )
+    : errorLogs;
+
+  const loadReturns = async () => {
+    setReturnsLoading(true);
+    setReturnsError("");
+    try {
+      const res = await SheetsAPI.listReturns();
+      if (res.demo) {
+        setReturnsDemoMode(true);
+      } else if (res.ok) {
+        setReturns(res.returns || []);
+      } else {
+        setReturnsError(res.message || "Couldn't load return requests.");
+      }
+    } catch (err) {
+      setReturnsError(err.message || "Couldn't load return requests.");
+    } finally {
+      setReturnsLoading(false);
+      setReturnsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "returns" && !returnsLoaded && !returnsLoading) {
+      loadReturns();
+    }
+  }, [tab, returnsLoaded, returnsLoading]);
+
+  const loadCallbacks = async () => {
+    setCallbacksLoading(true);
+    setCallbacksError("");
+    try {
+      const res = await SheetsAPI.listCallbackRequests();
+      if (res.demo) {
+        setCallbacksDemoMode(true);
+      } else if (res.ok) {
+        setCallbacks(res.requests || []);
+      } else {
+        setCallbacksError(res.message || "Couldn't load help desk requests.");
+      }
+    } catch (err) {
+      setCallbacksError(err.message || "Couldn't load help desk requests.");
+    } finally {
+      setCallbacksLoading(false);
+      setCallbacksLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "helpdesk" && !callbacksLoaded && !callbacksLoading) {
+      loadCallbacks();
+    }
+  }, [tab, callbacksLoaded, callbacksLoading]);
+
+  const handleUpdateCallback = async (requestId, status) => {
+    setCallbackActionId(requestId);
+    try {
+      const res = await SheetsAPI.updateCallbackStatus({
+        requestId,
+        status,
+        adminNote: callbackNoteDrafts[requestId] ?? undefined,
+      });
+      if (res.ok) {
+        setCallbacks((prev) => prev.map((c) => (c.requestId === requestId ? res.request : c)));
+        flashMessage(setCallbackActionMsg, requestId, "success", `Marked as ${status}.`);
+      } else {
+        flashMessage(setCallbackActionMsg, requestId, "error", res.message || "Couldn't update this request.");
+      }
+    } catch (err) {
+      flashMessage(setCallbackActionMsg, requestId, "error", err.message || "Couldn't update this request.");
+    } finally {
+      setCallbackActionId(null);
+    }
+  };
+
+  const handleReviewReturn = async (returnId, decision) => {
+    setReturnActionId(returnId);
+    try {
+      const res = await SheetsAPI.reviewReturn({
+        returnId,
+        decision,
+        adminNote: returnNoteDrafts[returnId] || "",
+      });
+      if (res.ok) {
+        setReturns((prev) => prev.map((r) => (r.returnId === returnId ? res.returnRequest : r)));
+        if (res.refundError) {
+          flashMessage(
+            setReturnActionMsg,
+            returnId,
+            "error",
+            `Approved, but the automatic refund failed: ${res.refundError}. Use "Retry refund" below once resolved.`
+          );
+        } else if (decision === "approved" && res.returnRequest?.type === "Return") {
+          flashMessage(
+            setReturnActionMsg,
+            returnId,
+            "success",
+            `Return approved ✅ — refund of ₹${res.returnRequest.refundAmount} processed and customer notified by email.`
+          );
+        } else if (decision === "approved") {
+          flashMessage(setReturnActionMsg, returnId, "success", "Exchange approved ✅ — customer notified by email.");
+        } else {
+          flashMessage(setReturnActionMsg, returnId, "success", "Request rejected — customer notified by email.");
+        }
+      } else {
+        flashMessage(setReturnActionMsg, returnId, "error", res.message || "Couldn't update this request.");
+      }
+    } catch (err) {
+      flashMessage(setReturnActionMsg, returnId, "error", err.message || "Couldn't update this request.");
+    } finally {
+      setReturnActionId(null);
+    }
+  };
+
+  const handleRetryRefund = async (returnId) => {
+    setReturnActionId(returnId);
+    try {
+      const res = await SheetsAPI.retryRefund(returnId);
+      if (res.refund) {
+        await loadReturns();
+      }
+      if (res.ok) {
+        flashMessage(setReturnActionMsg, returnId, "success", `Refund of ₹${res.refund?.amount} processed successfully ✅`);
+      } else {
+        flashMessage(setReturnActionMsg, returnId, "error", res.message || res.refund?.message || "Refund retry failed.");
+      }
+    } catch (err) {
+      flashMessage(setReturnActionMsg, returnId, "error", err.message || "Refund retry failed.");
+    } finally {
+      setReturnActionId(null);
+    }
+  };
+
+  // Shows a one-off success/error message next to a specific order or
+  // return card, then clears it after a few seconds.
+  const flashMessage = (setter, key, type, text) => {
+    setter((prev) => ({ ...prev, [key]: { type, text } }));
+    setTimeout(() => {
+      setter((prev) => {
+        if (prev[key]?.text !== text) return prev; // a newer message replaced it — leave it alone
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }, 6000);
+  };
+
   const draftFor = (order) =>
     orderDrafts[order.orderId] || {
       status: order.trackingStatus || "Order Placed",
@@ -172,19 +379,34 @@ export default function AdminDashboard() {
           return next;
         });
         if (res.skipped) {
-          alert(res.message); // e.g. "Order is already marked \"Shipped\" — no changes made."
+          flashMessage(setOrderActionMsg, order.orderId, "success", res.message);
         } else if (res.emailError) {
-          alert(
-            `Status updated, but the notification email failed to send.\n\n` +
-              `Reason: ${res.emailError}\n\n` +
-              `Tip: open Apps Script → run "testEmailSetup" once from the editor to authorize email sending (see CHANGES.md).`
+          flashMessage(
+            setOrderActionMsg,
+            order.orderId,
+            "success",
+            `Shipment updated to "${draft.status}" ✅ — but the customer notification email failed to send (${res.emailError}). Run "testEmailSetup" in Apps Script once to fix this.`
+          );
+        } else {
+          flashMessage(
+            setOrderActionMsg,
+            order.orderId,
+            "success",
+            `Shipment updated to "${draft.status}" ✅ — customer notified by email.`
           );
         }
       } else {
-        alert(res.message || "Couldn't update this order. Please try again.");
+        flashMessage(setOrderActionMsg, order.orderId, "error", res.message || "Couldn't update this order. Please try again.");
       }
     } catch (err) {
-      alert(err.message || "Couldn't update this order. Please try again.");
+      flashMessage(
+        setOrderActionMsg,
+        order.orderId,
+        "error",
+        err.isTimeout
+          ? err.message
+          : err.message || "Couldn't update this order. Please try again."
+      );
     } finally {
       setOrderSavingId(null);
     }
@@ -333,7 +555,16 @@ export default function AdminDashboard() {
     <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">
-          Admin · {tab === "products" ? "Products" : "Orders"}
+          Admin ·{" "}
+          {tab === "products"
+            ? "Products"
+            : tab === "orders"
+            ? "Orders"
+            : tab === "returns"
+            ? "Returns & Refunds"
+            : tab === "helpdesk"
+            ? "Help Desk"
+            : "Error Logs"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
           Logout
@@ -356,6 +587,30 @@ export default function AdminDashboard() {
           }`}
         >
           Orders &amp; Shipment Tracking
+        </button>
+        <button
+          onClick={() => setTab("returns")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "returns" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Returns &amp; Refunds
+        </button>
+        <button
+          onClick={() => setTab("helpdesk")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "helpdesk" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Help Desk
+        </button>
+        <button
+          onClick={() => setTab("errors")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "errors" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Error Logs
         </button>
       </div>
 
@@ -606,6 +861,15 @@ export default function AdminDashboard() {
                         >
                           {orderSavingId === order.orderId ? "Saving..." : "Save update"}
                         </button>
+                        {orderActionMsg[order.orderId] && (
+                          <p
+                            className={`mt-2 text-xs font-medium ${
+                              orderActionMsg[order.orderId].type === "success" ? "text-green-700" : "text-red-700"
+                            }`}
+                          >
+                            {orderActionMsg[order.orderId].text}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -686,6 +950,475 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {tab === "returns" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Review the photos/video the customer submitted, then Approve or
+            Reject. Approving a <strong>Return</strong> automatically refunds
+            the customer via Razorpay — no manual step needed. Approving an{" "}
+            <strong>Exchange</strong> doesn't move money; arrange the
+            replacement shipment separately.
+          </p>
+
+          {returnsDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so return requests
+              can't be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!returnsDemoMode && returnsError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {returnsError}
+              <button onClick={loadReturns} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!returnsDemoMode && (
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={loadReturns}
+                disabled={returnsLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {returnsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">{returns.length} total</span>
+            </div>
+          )}
+
+          {!returnsDemoMode && !returnsLoading && returns.length === 0 && !returnsError && (
+            <p className="mt-6 text-center text-sm text-[var(--color-charcoal)]/50">
+              No return or exchange requests yet.
+            </p>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {returns.map((r) => {
+              const isOpen = expandedReturnId === r.returnId;
+              const busy = returnActionId === r.returnId;
+              return (
+                <div key={r.returnId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{r.returnId}</p>
+                      <p className="text-sm text-[var(--color-charcoal)]/60">
+                        {r.type} · Order {r.orderId} · {r.customerName} ({r.email})
+                      </p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {r.requestedAt ? new Date(r.requestedAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          r.status === "Approved"
+                            ? "bg-green-100 text-green-700"
+                            : r.status === "Rejected"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {r.status}
+                      </span>
+                      {r.type === "Return" && r.status === "Approved" && (
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            r.refundStatus === "Processed"
+                              ? "bg-green-100 text-green-700"
+                              : r.refundStatus === "Failed"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          Refund: {r.refundStatus}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="mt-3 text-sm text-[var(--color-charcoal)]/70">{r.reason}</p>
+
+                  <button
+                    onClick={() => setExpandedReturnId(isOpen ? null : r.returnId)}
+                    className="mt-3 text-xs font-semibold text-[var(--color-forest-dark)] underline"
+                  >
+                    {isOpen ? "Hide details" : "View items, photos & video"}
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-3 border-t border-[var(--color-forest)]/10 pt-3">
+                      <div>
+                        <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Items</div>
+                        <ul className="mt-1 text-sm text-[var(--color-charcoal)]/70">
+                          {(r.items || []).map((it, i) => (
+                            <li key={i}>{it.name} × {it.qty}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Photos</div>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {(r.imageLinks || []).map((link, i) => (
+                            <a
+                              key={i}
+                              href={link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-[var(--color-forest)]/20 px-3 py-1 text-xs font-medium text-[var(--color-forest-dark)]"
+                            >
+                              Photo {i + 1}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                      {r.videoLink && (
+                        <div>
+                          <div className="text-xs font-semibold text-[var(--color-charcoal)]/60">Video</div>
+                          <a
+                            href={r.videoLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-block rounded-full border border-[var(--color-forest)]/20 px-3 py-1 text-xs font-medium text-[var(--color-forest-dark)]"
+                          >
+                            Watch video
+                          </a>
+                        </div>
+                      )}
+
+                      {r.status === "Requested" && (
+                        <div>
+                          <label className="text-xs font-semibold text-[var(--color-charcoal)]/60">
+                            Note (optional, included in the customer's email)
+                          </label>
+                          <textarea
+                            value={returnNoteDrafts[r.returnId] || ""}
+                            onChange={(e) =>
+                              setReturnNoteDrafts((prev) => ({ ...prev, [r.returnId]: e.target.value }))
+                            }
+                            rows={2}
+                            className="mt-1 w-full rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm"
+                          />
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => handleReviewReturn(r.returnId, "approved")}
+                              disabled={busy}
+                              className="rounded-full bg-[var(--color-forest-dark)] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {busy ? "Processing..." : "Approve"}
+                            </button>
+                            <button
+                              onClick={() => handleReviewReturn(r.returnId, "rejected")}
+                              disabled={busy}
+                              className="rounded-full border border-red-300 px-5 py-2 text-xs font-semibold text-red-700 disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {r.status === "Approved" && r.type === "Return" && r.refundStatus === "Failed" && (
+                        <button
+                          onClick={() => handleRetryRefund(r.returnId)}
+                          disabled={busy}
+                          className="rounded-full border border-[var(--color-forest)]/20 px-5 py-2 text-xs font-semibold text-[var(--color-forest-dark)] disabled:opacity-60"
+                        >
+                          {busy ? "Retrying..." : "Retry refund"}
+                        </button>
+                      )}
+
+                      {r.adminNote && (
+                        <p className="text-xs text-[var(--color-charcoal)]/60">Note: {r.adminNote}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {returnActionMsg[r.returnId] && (
+                    <p
+                      className={`mt-3 text-xs font-medium ${
+                        returnActionMsg[r.returnId].type === "success" ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {returnActionMsg[r.returnId].text}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "helpdesk" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Requests submitted from the storefront's "Need help?" chat
+            widget land here. Call or WhatsApp the customer directly, then
+            mark the request Contacted / Resolved so nothing falls through
+            the cracks.
+          </p>
+
+          {callbacksDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so help desk
+              requests can't be loaded here yet. See README.md to connect
+              the backend.
+            </div>
+          )}
+
+          {!callbacksDemoMode && callbacksError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {callbacksError}
+              <button onClick={loadCallbacks} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!callbacksDemoMode && (
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={loadCallbacks}
+                disabled={callbacksLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {callbacksLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">{callbacks.length} total</span>
+            </div>
+          )}
+
+          {!callbacksDemoMode && !callbacksLoading && callbacks.length === 0 && !callbacksError && (
+            <p className="mt-6 text-center text-sm text-[var(--color-charcoal)]/50">
+              No help desk requests yet.
+            </p>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {callbacks.map((c) => {
+              const isOpen = expandedCallbackId === c.requestId;
+              const busy = callbackActionId === c.requestId;
+              const digitsOnly = (c.phone || "").replace(/\D/g, "");
+              const waNumber = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
+              return (
+                <div key={c.requestId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{c.requestId}</p>
+                      <p className="text-sm text-[var(--color-charcoal)]/60">
+                        {c.name || "(no name)"} · {c.phone}
+                        {c.orderId ? ` · Order ${c.orderId}` : ""}
+                      </p>
+                      <p className="text-xs text-[var(--color-charcoal)]/50">
+                        {c.requestedAt ? new Date(c.requestedAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        c.status === "Resolved"
+                          ? "bg-green-100 text-green-700"
+                          : c.status === "Cancelled"
+                          ? "bg-red-100 text-red-700"
+                          : c.status === "Contacted"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {c.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-3 text-sm font-medium text-[var(--color-charcoal)]/80">{c.queryType}</p>
+                  {c.message && <p className="mt-1 text-sm text-[var(--color-charcoal)]/60">{c.message}</p>}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {digitsOnly && (
+                      <>
+                        <a
+                          href={`tel:+${waNumber}`}
+                          className="rounded-full border border-[var(--color-forest)]/20 px-3 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)]"
+                        >
+                          Call
+                        </a>
+                        <a
+                          href={`https://wa.me/${waNumber}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full bg-[#25D366] px-3 py-1.5 text-xs font-semibold text-white"
+                        >
+                          WhatsApp customer
+                        </a>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setExpandedCallbackId(isOpen ? null : c.requestId)}
+                    className="mt-3 text-xs font-semibold text-[var(--color-forest-dark)] underline"
+                  >
+                    {isOpen ? "Hide" : "Update status"}
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2 border-t border-[var(--color-forest)]/10 pt-3">
+                      <label className="text-xs font-semibold text-[var(--color-charcoal)]/60">
+                        Internal note (optional)
+                      </label>
+                      <textarea
+                        value={callbackNoteDrafts[c.requestId] ?? c.adminNote ?? ""}
+                        onChange={(e) =>
+                          setCallbackNoteDrafts((prev) => ({ ...prev, [c.requestId]: e.target.value }))
+                        }
+                        rows={2}
+                        className="w-full rounded-lg border border-[var(--color-forest)]/20 px-3 py-2 text-sm"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {["Pending", "Contacted", "Resolved", "Cancelled"].map((s) => (
+                          <button
+                            key={s}
+                            disabled={busy || c.status === s}
+                            onClick={() => handleUpdateCallback(c.requestId, s)}
+                            className="rounded-full border border-[var(--color-forest)]/20 px-4 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)] disabled:opacity-40"
+                          >
+                            {busy ? "..." : s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {callbackActionMsg[c.requestId] && (
+                    <p
+                      className={`mt-3 text-xs font-medium ${
+                        callbackActionMsg[c.requestId].type === "success" ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {callbackActionMsg[c.requestId].text}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "errors" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Customers never see a raw error — they see an "Oops" screen with
+            a short trial ID instead. Paste that ID in here to see exactly
+            what actually happened.
+          </p>
+
+          {errorLogsDemoMode && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Demo mode: VITE_SHEETS_API_URL isn't set, so error logs can't
+              be loaded here yet. See README.md to connect the backend.
+            </div>
+          )}
+
+          {!errorLogsDemoMode && errorLogsError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorLogsError}
+              <button onClick={loadErrorLogs} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!errorLogsDemoMode && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <input
+                value={errorSearch}
+                onChange={(e) => setErrorSearch(e.target.value)}
+                placeholder="Search by trial ID, e.g. NB-8K2F41"
+                className="w-full max-w-xs rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm"
+              />
+              <button
+                onClick={loadErrorLogs}
+                disabled={errorLogsLoading}
+                className="rounded-full border border-[var(--color-forest)]/20 px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {errorLogsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <span className="text-xs text-[var(--color-charcoal)]/50">
+                {filteredErrorLogs.length} of {errorLogs.length} logged
+              </span>
+            </div>
+          )}
+
+          {!errorLogsDemoMode && !errorLogsError && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--color-forest)]/10">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-[var(--color-cream-deep)] text-xs uppercase text-[var(--color-charcoal)]/60">
+                  <tr>
+                    <th className="px-4 py-2.5">Trial ID</th>
+                    <th className="px-4 py-2.5">When</th>
+                    <th className="px-4 py-2.5">Context</th>
+                    <th className="px-4 py-2.5">Message</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-forest)]/10">
+                  {filteredErrorLogs.map((log) => (
+                    <Fragment key={log.trialId}>
+                      <tr
+                        onClick={() =>
+                          setExpandedTrialId((id) => (id === log.trialId ? null : log.trialId))
+                        }
+                        className="cursor-pointer hover:bg-[var(--color-cream-deep)]/50"
+                      >
+                        <td className="px-4 py-2.5 font-display font-semibold text-[var(--color-forest-dark)]">
+                          {log.trialId}
+                        </td>
+                        <td className="px-4 py-2.5 text-[var(--color-charcoal)]/70">
+                          {log.timestamp ? new Date(log.timestamp).toLocaleString() : "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-[var(--color-charcoal)]/70">{log.context}</td>
+                        <td className="max-w-xs truncate px-4 py-2.5 text-[var(--color-charcoal)]/70">
+                          {log.message}
+                        </td>
+                      </tr>
+                      {expandedTrialId === log.trialId && (
+                        <tr>
+                          <td colSpan={4} className="bg-[var(--color-cream-deep)]/40 px-4 py-3">
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Page URL</div>
+                            <div className="mb-2 break-all text-sm">{log.url || "—"}</div>
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Browser</div>
+                            <div className="mb-2 break-all text-sm">{log.userAgent || "—"}</div>
+                            <div className="text-xs text-[var(--color-charcoal)]/60">Full message</div>
+                            <div className="mb-2 whitespace-pre-wrap text-sm">{log.message}</div>
+                            {log.stack && (
+                              <>
+                                <div className="text-xs text-[var(--color-charcoal)]/60">Stack trace</div>
+                                <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-white/70 p-3 text-xs">
+                                  {log.stack}
+                                </pre>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                  {!errorLogsLoading && filteredErrorLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-[var(--color-charcoal)]/50">
+                        {errorSearch ? "No error matches that trial ID." : "No errors logged yet — good sign."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {importPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6">
