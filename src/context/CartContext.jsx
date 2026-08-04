@@ -114,4 +114,16 @@ export function CartProvider({ children }) {
   );
 }
 
-export const useCart = () => useContext(CartContext);
+export const useCart = () => {
+  const ctx = useContext(CartContext);
+  if (!ctx) {
+    // Same guard as useWishlist() — prevents a hard crash (destructuring
+    // `items` off null) if this ever renders outside <CartProvider>.
+    console.error("useCart() called outside <CartProvider> — cart data unavailable.");
+    return {
+      items: [], addItem: () => {}, removeItem: () => {}, updateQty: () => {},
+      clearCart: () => {}, subtotal: 0, count: 0,
+    };
+  }
+  return ctx;
+};

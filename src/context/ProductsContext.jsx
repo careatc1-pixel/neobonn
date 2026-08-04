@@ -63,4 +63,14 @@ export function ProductsProvider({ children }) {
   );
 }
 
-export const useProducts = () => useContext(ProductsContext);
+export const useProducts = () => {
+  const ctx = useContext(ProductsContext);
+  if (!ctx) {
+    console.error("useProducts() called outside <ProductsProvider> — product data unavailable.");
+    return {
+      products: [], loading: false, demoMode: false, loadError: "Product service unavailable.",
+      refresh: () => {}, getProductById: () => undefined, isOutOfStock: () => false,
+    };
+  }
+  return ctx;
+};
