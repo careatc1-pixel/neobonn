@@ -74,6 +74,8 @@ export default function Cart() {
                       src={item.image}
                       onError={(e) => (e.currentTarget.style.opacity = 0)}
                       alt={item.name}
+                      loading="lazy"
+                      decoding="async"
                       className="h-24 w-24 rounded-xl bg-[var(--color-cream-deep)] object-cover sm:h-28 sm:w-28"
                     />
                   </Link>

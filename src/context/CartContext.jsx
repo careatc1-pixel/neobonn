@@ -27,11 +27,14 @@ function writeCart(key, items) {
 function mergeCarts(base, incoming) {
   const merged = [...base];
   incoming.forEach((inc) => {
-    const existing = merged.find((i) => i.id === inc.id);
-    if (existing) {
+    const idx = merged.findIndex((i) => i.id === inc.id);
+    if (idx !== -1) {
+      const existing = merged[idx];
       const stock = Number(inc.stock ?? existing.stock ?? Infinity);
-      existing.qty = Math.min(stock, existing.qty + inc.qty);
-      existing.stock = stock;
+      // Replace with a new object instead of mutating `existing` in place —
+      // `existing` came from `base` (spread, not deep-cloned), so mutating
+      // it directly was quietly editing state outside of setItems.
+      merged[idx] = { ...existing, stock, qty: Math.min(stock, existing.qty + inc.qty) };
     } else {
       merged.push(inc);
     }
