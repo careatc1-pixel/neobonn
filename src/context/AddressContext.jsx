@@ -101,9 +101,16 @@ export function AddressProvider({ children }) {
       return { ok: true, demo: true, address: saved };
     }
 
-    const res = await SheetsAPI.saveAddress(payload);
-    if (res.ok) await load();
-    return res;
+    try {
+      const res = await SheetsAPI.saveAddress(payload);
+      if (res.ok) await load();
+      return res;
+    } catch (err) {
+      // SheetsAPI throws on network/HTTP failures — turn that into the
+      // same {ok:false, message} shape callers already expect instead
+      // of an unhandled rejection.
+      return { ok: false, message: err.message || "Could not save this address. Please try again." };
+    }
   };
 
   const deleteAddress = async (addressId) => {
@@ -120,9 +127,13 @@ export function AddressProvider({ children }) {
       return { ok: true, demo: true };
     }
 
-    const res = await SheetsAPI.deleteAddress({ addressId, email });
-    if (res.ok) await load();
-    return res;
+    try {
+      const res = await SheetsAPI.deleteAddress({ addressId, email });
+      if (res.ok) await load();
+      return res;
+    } catch (err) {
+      return { ok: false, message: err.message || "Could not remove this address. Please try again." };
+    }
   };
 
   const setDefaultAddress = async (addressId) => {
@@ -135,9 +146,13 @@ export function AddressProvider({ children }) {
       return { ok: true, demo: true };
     }
 
-    const res = await SheetsAPI.setDefaultAddress({ addressId, email });
-    if (res.ok) await load();
-    return res;
+    try {
+      const res = await SheetsAPI.setDefaultAddress({ addressId, email });
+      if (res.ok) await load();
+      return res;
+    } catch (err) {
+      return { ok: false, message: err.message || "Could not update your default address. Please try again." };
+    }
   };
 
   const defaultAddress = addresses.find((a) => a.isDefault) || addresses[0] || null;
@@ -160,4 +175,17 @@ export function AddressProvider({ children }) {
   );
 }
 
-export const useAddresses = () => useContext(AddressContext);
+export const useAddresses = () => {
+  const ctx = useContext(AddressContext);
+  if (!ctx) {
+    console.error("useAddresses() called outside <AddressProvider> — address data unavailable.");
+    return {
+      addresses: [], loading: false, demoMode: false, defaultAddress: null,
+      saveAddress: async () => ({ ok: false, message: "Address service unavailable." }),
+      deleteAddress: async () => ({ ok: false, message: "Address service unavailable." }),
+      setDefaultAddress: async () => ({ ok: false, message: "Address service unavailable." }),
+      reload: () => {},
+    };
+  }
+  return ctx;
+};

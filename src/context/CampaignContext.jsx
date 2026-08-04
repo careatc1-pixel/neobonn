@@ -38,4 +38,11 @@ export function CampaignProvider({ children }) {
   );
 }
 
-export const useCampaign = () => useContext(CampaignContext);
+export const useCampaign = () => {
+  const ctx = useContext(CampaignContext);
+  if (!ctx) {
+    console.error("useCampaign() called outside <CampaignProvider> — campaign data unavailable.");
+    return { campaign: null, discountPercent: 0, loading: false, refresh: () => {} };
+  }
+  return ctx;
+};

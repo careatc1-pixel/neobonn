@@ -23,7 +23,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     const res = await login(form.email, form.password);
-    if (res.ok) navigate("/account");
+    if (res.ok) navigate("/");
     else setError(res.message || "Invalid email or password.");
   };
 
@@ -50,14 +50,14 @@ export default function Login() {
     e.preventDefault();
     setError("");
     const res = await loginWithOtp(form.email, otp);
-    if (res.ok) navigate("/account");
+    if (res.ok) navigate("/");
     else setError(res.message || "Invalid or expired code.");
   };
 
   const handleGoogleCredential = async (response) => {
     setGoogleError("");
     const res = await loginWithGoogle(response.credential);
-    if (res.ok) navigate("/account");
+    if (res.ok) navigate("/");
     else setGoogleError(res.message || "Google sign-in failed. Please try again.");
   };
 
