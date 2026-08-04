@@ -15,7 +15,7 @@ export default function Signup() {
     e.preventDefault();
     setError("");
     const res = await signup(form.name, form.email, form.phone, form.password);
-    if (res.ok) navigate("/account");
+    if (res.ok) navigate("/");
     else setError(res.message || "Could not create account.");
   };
 
