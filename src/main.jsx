@@ -6,6 +6,7 @@ import App from "./App.jsx";
 import { CartProvider } from "./context/CartContext.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { ProductsProvider } from "./context/ProductsContext.jsx";
+import { AddressProvider } from "./context/AddressContext.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import GlobalErrorOverlay from "./components/GlobalErrorOverlay.jsx";
 
@@ -21,9 +22,11 @@ createRoot(document.getElementById("root")).render(
       <BrowserRouter>
         <AuthProvider>
           <ProductsProvider>
-            <CartProvider>
-              <App />
-            </CartProvider>
+            <AddressProvider>
+              <CartProvider>
+                <App />
+              </CartProvider>
+            </AddressProvider>
           </ProductsProvider>
         </AuthProvider>
       </BrowserRouter>

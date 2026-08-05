@@ -176,3 +176,43 @@ The number **9310035064** is hardcoded in two places — the chat widget
 if you ever change your business WhatsApp number, update it in both
 spots. This uses `wa.me` links (WhatsApp's own free deep-linking
 service) — no WhatsApp Business API subscription needed, and no cost.
+
+## 6. New: GST invoice auto-attached when an order is marked Delivered
+
+When an admin moves an order to **Delivered** (Admin -> Orders), the
+customer's delivery email now automatically includes a GST tax invoice
+as a PDF attachment — no extra step, no separate button.
+
+**What the invoice includes:** your business name/address, GSTIN
+(once you set it), a sequential invoice number (`INV/2026-27/00001`,
+reset each Indian financial year), invoice date, order ID, the
+customer's billing details, an item-by-item breakdown with HSN code,
+taxable value, and either CGST+SGST (if the delivery pincode starts
+with `110`, i.e. Delhi — same state as the seller) or IGST (any other
+state), plus the grand total.
+
+**Before going live, fill in your real business details** at the top
+of `google-apps-script/Code.gs` (search for "GST Invoice"):
+- `SELLER_LEGAL_NAME`, `SELLER_ADDRESS` — already pre-filled from your
+  existing details, update if they've changed.
+- `SELLER_GSTIN` — currently blank. Add your GSTIN here once you have
+  one. If left blank, invoices still send (a delivery email is never
+  blocked on this) — they just print "GSTIN: Not registered / not set"
+  instead of a number.
+- `SELLER_STATE_NAME` / `SELLER_PINCODE_PREFIX` — used only to decide
+  CGST+SGST vs IGST from the delivery PIN code (an approximation, since
+  the app doesn't separately store a "state" field on orders).
+- `GST_RATE_PERCENT` (default 18) / `INVOICE_HSN_CODE` — adjust if your
+  products fall under a different GST slab or HSN code.
+
+**Reliability:** invoice generation is wrapped in its own try/catch —
+if it ever fails for any reason, the plain delivery confirmation email
+still sends normally (nothing about marking an order Delivered can
+fail because of this). No new sheet tab or deployment step is needed;
+the running invoice-number counter is stored in Apps Script's Script
+Properties, which survives redeploys.
+
+**Worth knowing:** this generates a standard-format tax invoice but
+isn't a substitute for a quick sign-off from your accountant/CA on your
+specific GST compliance setup (e.g. e-invoicing thresholds, numbering
+rules) before relying on it for filing.

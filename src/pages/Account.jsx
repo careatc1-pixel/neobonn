@@ -389,7 +389,7 @@ export default function Account() {
             {wishlistItems.map((item) => (
               <div key={item.id} className="overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
                 <div className="aspect-square overflow-hidden bg-[var(--color-cream-deep)]">
-                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                  <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
                 </div>
                 <div className="p-3">
                   <p className="truncate text-sm font-medium text-[var(--color-charcoal)]">{item.name}</p>

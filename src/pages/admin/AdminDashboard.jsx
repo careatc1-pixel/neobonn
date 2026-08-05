@@ -392,7 +392,8 @@ export default function AdminDashboard() {
             setOrderActionMsg,
             order.orderId,
             "success",
-            `Shipment updated to "${draft.status}" ✅ — customer notified by email.`
+            `Shipment updated to "${draft.status}" ✅ — customer notified by email.` +
+              (res.invoiceNumber ? ` GST invoice ${res.invoiceNumber} attached.` : "")
           );
         }
       } else {

@@ -116,6 +116,15 @@
  * simplicity. Before going live, hash passwords (e.g. with a salted
  * SHA-256 via Utilities.computeDigest) before writing to the sheet,
  * and compare hashes on login instead of raw text.
+ *
+ * GST INVOICE ON DELIVERY: when an order is marked "Delivered" (Admin
+ * -> Orders), a GST tax invoice PDF is generated and attached to the
+ * delivery email automatically — no separate action needed. Before
+ * going live, fill in your real business details in the "GST Invoice"
+ * constants below (SELLER_LEGAL_NAME, SELLER_ADDRESS, SELLER_GSTIN,
+ * SELLER_STATE_NAME, SELLER_PINCODE_PREFIX, GST_RATE_PERCENT). If
+ * SELLER_GSTIN is left blank the invoice still sends (so a delivery
+ * email is never blocked on this), just without a GSTIN printed on it.
  * ------------------------------------------------------------------
  */
 
@@ -125,10 +134,168 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-02-helpdesk-v1";
+const CODE_VERSION = "2026-08-04-gst-invoice-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
+}
+
+// ---------------- GST Invoice (auto-sent when an order is marked Delivered) ----------------
+// Fill these in with your real business details before going live — the
+// invoice PDF is generated straight from these constants. If you leave
+// SELLER_GSTIN blank, the invoice still sends (so a delivery email is
+// never blocked), but it prints "GSTIN: Not registered / not set" —
+// fine if you're a small seller without GST registration yet, but
+// update this the moment you have a GSTIN.
+const SELLER_LEGAL_NAME = "Atharv Luxe Co.";
+const SELLER_ADDRESS = "Block B-2, House No. 239, Paschim Vihar, New Delhi - 110063";
+const SELLER_GSTIN = ""; // e.g. "07ABCDE1234F1Z5" — from your GST registration certificate
+const SELLER_STATE_NAME = "Delhi";
+const SELLER_PINCODE_PREFIX = "110"; // Delhi PINs start with 110 — used only to decide CGST+SGST (buyer in Delhi) vs IGST (buyer elsewhere). This is an approximation from PIN code, not a stored customer state — accurate for the vast majority of addresses, but if you ever see a Delhi order taxed as IGST (or vice versa) because of an edge-case PIN, this is why.
+const GST_RATE_PERCENT = 18; // change if your products fall under a different GST slab
+const INVOICE_HSN_CODE = "3304"; // generic HSN for cosmetic/skincare preparations — override here if your products fall under a different HSN
+
+// NOTE: this generates a standard-format tax invoice (seller GSTIN,
+// invoice number, HSN, taxable value, CGST/SGST/IGST breakup) but isn't
+// a substitute for your accountant/CA signing off on your specific GST
+// compliance setup (e-invoicing thresholds, numbering rules, etc.) —
+// worth a quick review with them before relying on this for filing.
+
+// Invoice numbers must be sequential within a financial year for GST
+// compliance — this keeps a running counter in Script Properties
+// (survives redeploys, since it's not part of the code) rather than in
+// a sheet, so it can never collide with a concurrent order.
+function getNextInvoiceNumber() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const fy = getIndianFinancialYearLabel(new Date());
+    const key = "invoiceSeq_" + fy;
+    const next = (parseInt(props.getProperty(key) || "0", 10) || 0) + 1;
+    props.setProperty(key, String(next));
+    return "INV/" + fy + "/" + String(next).padStart(5, "0");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Indian financial year runs Apr 1 -> Mar 31, e.g. a March 2027 order
+// is FY "2026-27", not "2027-28".
+function getIndianFinancialYearLabel(date) {
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const startYear = m >= 4 ? y : y - 1;
+  return startYear + "-" + String((startYear + 1) % 100).padStart(2, "0");
+}
+
+function isIntraStateOrder(pincode) {
+  return String(pincode || "").trim().indexOf(SELLER_PINCODE_PREFIX) === 0;
+}
+
+function escapeHtmlForInvoice(str) {
+  return String(str == null ? "" : str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Builds the invoice as HTML, then converts it to PDF using Apps
+// Script's built-in blob conversion (the same engine Google Docs uses
+// to "print to PDF") — no external service, no extra API keys needed.
+// Table-based layout on purpose: the HTML->PDF converter doesn't
+// reliably support flexbox/grid, but table layouts render consistently.
+function buildGstInvoiceHtml(order, invoiceNumber) {
+  const items = order.items || [];
+  const intraState = isIntraStateOrder(order.pincode);
+  const rate = GST_RATE_PERCENT;
+
+  let taxableTotal = 0;
+  let taxTotal = 0;
+  const itemRows = items
+    .map((it) => {
+      const lineTotal = (Number(it.price) || 0) * (Number(it.qty) || 0); // price stored is GST-inclusive
+      const taxable = lineTotal / (1 + rate / 100);
+      const tax = lineTotal - taxable;
+      taxableTotal += taxable;
+      taxTotal += tax;
+      return (
+        "<tr>" +
+        "<td>" + escapeHtmlForInvoice(it.name) + "</td>" +
+        "<td>" + INVOICE_HSN_CODE + "</td>" +
+        '<td style="text-align:center">' + (it.qty || 0) + "</td>" +
+        '<td style="text-align:right">Rs. ' + taxable.toFixed(2) + "</td>" +
+        '<td style="text-align:right">Rs. ' + lineTotal.toFixed(2) + "</td>" +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  const cgst = intraState ? taxTotal / 2 : 0;
+  const sgst = intraState ? taxTotal / 2 : 0;
+  const igst = intraState ? 0 : taxTotal;
+  const grandTotal = taxableTotal + taxTotal;
+  const invoiceDate = new Date().toLocaleDateString("en-IN");
+  const gstinLine = SELLER_GSTIN
+    ? "GSTIN: " + escapeHtmlForInvoice(SELLER_GSTIN)
+    : "GSTIN: Not registered / not set";
+
+  const taxRowsHtml = intraState
+    ? "<tr><td>CGST (" + (rate / 2).toFixed(1) + "%)</td><td style=\"text-align:right\">Rs. " + cgst.toFixed(2) + "</td></tr>" +
+      "<tr><td>SGST (" + (rate / 2).toFixed(1) + "%)</td><td style=\"text-align:right\">Rs. " + sgst.toFixed(2) + "</td></tr>"
+    : "<tr><td>IGST (" + rate + "%)</td><td style=\"text-align:right\">Rs. " + igst.toFixed(2) + "</td></tr>";
+
+  return (
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><style>" +
+    "body { font-family: Arial, sans-serif; font-size: 12px; color: #222; padding: 24px; }" +
+    "h1 { font-size: 20px; margin: 0 0 4px; }" +
+    ".muted { color: #666; }" +
+    "table.items { width: 100%; border-collapse: collapse; margin-top: 16px; }" +
+    "table.items th, table.items td { border: 1px solid #ccc; padding: 6px 8px; font-size: 11px; }" +
+    "table.items th { background: #f4f4f4; text-align: left; }" +
+    "table.meta { width: 100%; margin-top: 14px; }" +
+    "table.meta td { vertical-align: top; padding: 0; font-size: 11px; }" +
+    "table.totals { width: 280px; margin-left: auto; margin-top: 10px; }" +
+    "table.totals td { border: none; padding: 3px 8px; font-size: 12px; }" +
+    "</style></head><body>" +
+    "<h1>Tax Invoice</h1>" +
+    "<p class='muted'>" + escapeHtmlForInvoice(SELLER_LEGAL_NAME) + " &mdash; " + escapeHtmlForInvoice(SELLER_ADDRESS) + "<br/>" + gstinLine + "</p>" +
+    "<table class='meta'><tr>" +
+    "<td style='width:50%'>" +
+    "<strong>Invoice No:</strong> " + invoiceNumber + "<br/>" +
+    "<strong>Invoice Date:</strong> " + invoiceDate + "<br/>" +
+    "<strong>Order ID:</strong> " + escapeHtmlForInvoice(order.orderId) +
+    "</td>" +
+    "<td style='width:50%'>" +
+    "<strong>Billed To:</strong><br/>" +
+    escapeHtmlForInvoice(order.customerName) + "<br/>" +
+    escapeHtmlForInvoice(order.address) + ", " + escapeHtmlForInvoice(order.city) + " - " + escapeHtmlForInvoice(order.pincode) + "<br/>" +
+    escapeHtmlForInvoice(order.phone) +
+    "</td>" +
+    "</tr></table>" +
+    "<table class='items'><thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Taxable Value</th><th>Amount (incl. GST)</th></tr></thead>" +
+    "<tbody>" + itemRows + "</tbody></table>" +
+    "<table class='totals'>" +
+    "<tr><td>Taxable Value</td><td style='text-align:right'>Rs. " + taxableTotal.toFixed(2) + "</td></tr>" +
+    taxRowsHtml +
+    "<tr><td><strong>Total</strong></td><td style='text-align:right'><strong>Rs. " + grandTotal.toFixed(2) + "</strong></td></tr>" +
+    "</table>" +
+    "<p class='muted' style='margin-top:24px; font-size:10px;'>This is a system-generated invoice and does not require a signature. Seller state: " + escapeHtmlForInvoice(SELLER_STATE_NAME) + ".</p>" +
+    "</body></html>"
+  );
+}
+
+// Returns { blob, invoiceNumber }. Throws on failure — callers should
+// wrap this in try/catch so a PDF-generation hiccup never blocks the
+// delivery email itself from sending.
+function generateGstInvoicePdf(order) {
+  const invoiceNumber = getNextInvoiceNumber();
+  const html = buildGstInvoiceHtml(order, invoiceNumber);
+  const htmlBlob = Utilities.newBlob(html, "text/html", "invoice.html");
+  const pdfBlob = htmlBlob.getAs("application/pdf");
+  pdfBlob.setName("Invoice-" + order.orderId + ".pdf");
+  return { blob: pdfBlob, invoiceNumber: invoiceNumber };
 }
 
 // Visit your deployment URL directly in a browser (a plain GET request)
@@ -347,7 +514,9 @@ function sendOrderConfirmationEmail(order) {
   }
 }
 
-// Sent every time an admin moves an order to a new shipment stage.
+// Sent every time an admin moves an order to a new shipment stage. When
+// the new stage is "Delivered", a GST invoice PDF is generated and
+// attached automatically.
 function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
   try {
     if (!order || !order.email) return { ok: false, error: "No email on order." };
@@ -364,14 +533,33 @@ function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
     ];
     if (carrier) lines.push(`Courier: ${carrier}`);
     if (trackingNumber) lines.push(`Tracking number: ${trackingNumber}`);
+
+    const mailOptions = { name: "neobonn" };
+    let invoiceNumber = null;
+
+    if (status === "Delivered") {
+      try {
+        const invoice = generateGstInvoicePdf(order);
+        mailOptions.attachments = [invoice.blob];
+        invoiceNumber = invoice.invoiceNumber;
+        lines.push("", `Your GST invoice (${invoiceNumber}) is attached to this email as a PDF.`);
+      } catch (invoiceErr) {
+        // Never let invoice generation break the delivery email — log it
+        // (visible via Apps Script "Executions" tab) and send the plain
+        // delivery confirmation instead. The order is still marked
+        // Delivered either way; nothing about the order update fails.
+        console.error("GST invoice generation failed for " + order.orderId + ": " + invoiceErr.message);
+      }
+    }
+
     lines.push(
       "",
       `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}`,
       "",
       `— Team neobonn`
     );
-    MailApp.sendEmail(order.email, subject, lines.join("\n"), { name: "neobonn" });
-    return { ok: true };
+    MailApp.sendEmail(order.email, subject, lines.join("\n"), mailOptions);
+    return { ok: true, invoiceNumber };
   } catch (err) {
     console.error("sendOrderStatusEmail failed: " + err.message);
     return { ok: false, error: err.message };
@@ -912,6 +1100,7 @@ function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumbe
     order: updatedOrder,
     emailSent: !!emailResult.ok && !emailResult.skipped,
     emailError: emailResult.ok ? null : emailResult.error,
+    invoiceNumber: emailResult.invoiceNumber || null,
   };
 }
 
