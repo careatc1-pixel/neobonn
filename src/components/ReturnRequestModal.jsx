@@ -15,6 +15,7 @@ export default function ReturnRequestModal({ order, user, onClose, onSubmitted }
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [returnId, setReturnId] = useState(null);
+  const [refundMethod, setRefundMethod] = useState("Wallet"); // "Wallet" | "Original Payment" — only relevant for type === "Return"
 
   const toggleItem = (i) =>
     setSelected((prev) => prev.map((v, idx) => (idx === i ? !v : v)));
@@ -79,6 +80,7 @@ export default function ReturnRequestModal({ order, user, onClose, onSubmitted }
         reason: reason.trim(),
         images: imagePayloads,
         video: videoPayload,
+        refundMethod: type === "Return" ? refundMethod : undefined,
       });
       if (res.demo) {
         setSubmitError("Demo mode: connect the Google Sheets backend (see README.md) to submit real requests.");
@@ -114,6 +116,11 @@ export default function ReturnRequestModal({ order, user, onClose, onSubmitted }
               We've received your {type.toLowerCase()} request for order{" "}
               <span className="font-mono">{order.orderId}</span>. Our team will review the
               photos/video and get back to you shortly.
+              {type === "Return" && (
+                refundMethod === "Wallet"
+                  ? " Once approved, the refund will be credited to your neobonn Cash Wallet instantly."
+                  : " Once approved, the refund will be sent to your original payment method."
+              )}
             </p>
             <div className="mt-4 rounded-xl border border-[var(--color-forest)]/15 bg-[var(--color-cream-deep)] px-5 py-3">
               <div className="text-xs uppercase tracking-wide text-[var(--color-charcoal)]/50">
@@ -172,6 +179,44 @@ export default function ReturnRequestModal({ order, user, onClose, onSubmitted }
                 ))}
               </ul>
             </div>
+
+            {type === "Return" && (
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-charcoal)]/70">
+                  How should we refund you?
+                </label>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod("Wallet")}
+                    className={`rounded-xl border px-3 py-2.5 text-left text-xs font-medium transition-colors ${
+                      refundMethod === "Wallet"
+                        ? "border-[var(--color-forest-dark)] bg-[var(--color-forest-dark)]/5 text-[var(--color-forest-dark)]"
+                        : "border-[var(--color-forest)]/20 text-[var(--color-charcoal)]/70"
+                    }`}
+                  >
+                    <span className="block font-semibold">neobonn Cash Wallet</span>
+                    <span className="mt-0.5 block text-[10px] text-[var(--color-charcoal)]/50">
+                      Instant credit — use it on your next order
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod("Original Payment")}
+                    className={`rounded-xl border px-3 py-2.5 text-left text-xs font-medium transition-colors ${
+                      refundMethod === "Original Payment"
+                        ? "border-[var(--color-forest-dark)] bg-[var(--color-forest-dark)]/5 text-[var(--color-forest-dark)]"
+                        : "border-[var(--color-forest)]/20 text-[var(--color-charcoal)]/70"
+                    }`}
+                  >
+                    <span className="block font-semibold">Original payment method</span>
+                    <span className="mt-0.5 block text-[10px] text-[var(--color-charcoal)]/50">
+                      5-7 business days via your bank/UPI
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="text-xs font-semibold text-[var(--color-charcoal)]/70">

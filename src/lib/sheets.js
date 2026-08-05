@@ -127,7 +127,7 @@ export const SheetsAPI = {
   submitEnquiry: (data) => callSheetsApi("enquiry", data), // {name, email, phone, message}
 
   // ---- Orders sheet ----
-  placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, ...}
+  placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, walletAmount?, ...}
   verifyPayment: (data) => callSheetsApi("verifyPayment", data), // {orderId, razorpay_payment_id, razorpay_signature}
   getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // customer order history
 
@@ -157,11 +157,14 @@ export const SheetsAPI = {
   listErrors: () => callSheetsApi("listErrors"),
 
   // ---- Returns & Exchanges (7-day window, photo+video required) ----
-  submitReturnRequest: (data) => callSheetsApi("submitReturnRequest", data), // {orderId, email, phone, type, items, reason, images, video}
+  submitReturnRequest: (data) => callSheetsApi("submitReturnRequest", data), // {orderId, email, phone, type, items, reason, images, video, refundMethod?: "Wallet"|"Original Payment"}
   getMyReturns: (email) => callSheetsApi("getMyReturns", { email }), // customer's own return/exchange history
   listReturns: () => callSheetsApi("listReturns"), // admin: every request, newest first
-  reviewReturn: (data) => callSheetsApi("reviewReturn", data), // admin: {returnId, decision: "approved"|"rejected", adminNote?} — approving a Return auto-refunds via Razorpay
+  reviewReturn: (data) => callSheetsApi("reviewReturn", data), // admin: {returnId, decision: "approved"|"rejected", adminNote?} — approving a Return auto-refunds (to Wallet or via Razorpay, per the customer's choice)
   retryRefund: (returnId) => callSheetsApi("retryRefund", { returnId }), // admin: retry a refund that failed the first time
+
+  // ---- neobonn Cash Wallet ----
+  getWallet: (email) => callSheetsApi("getWallet", { email }), // {ok, balance, transactions} — customer's own wallet balance + ledger
 
   // ---- Help Desk / callback requests (chat widget) ----
   requestCallback: (data) => callSheetsApi("requestCallback", data), // {name?, phone, email?, orderId?, queryType, message?, preferredTime?}

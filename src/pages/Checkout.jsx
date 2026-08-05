@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
-import { LocateFixed, Loader2, Plus } from "lucide-react";
+import { LocateFixed, Loader2, Plus, Wallet } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useAddresses } from "../context/AddressContext";
@@ -21,6 +21,27 @@ function loadRazorpayScript() {
     script.onerror = () => resolve(false);
     document.body.appendChild(script);
   });
+}
+
+function WalletRedeemToggle({ walletBalance, maxWalletUsable, useWallet, setUseWallet }) {
+  if (walletBalance <= 0) return null;
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[var(--color-forest)]/15 bg-[var(--color-forest-dark)]/5 px-4 py-3">
+      <span className="flex items-center gap-2 text-sm font-medium text-[var(--color-charcoal)]">
+        <Wallet size={16} className="text-[var(--color-forest-dark)]" />
+        Use neobonn Cash Wallet (₹{walletBalance} available)
+      </span>
+      <input
+        type="checkbox"
+        checked={useWallet}
+        onChange={(e) => setUseWallet(e.target.checked)}
+        className="h-4 w-4 rounded border-[var(--color-forest)]/30 accent-[var(--color-forest-dark)]"
+      />
+      {useWallet && (
+        <span className="sr-only">₹{maxWalletUsable} will be applied</span>
+      )}
+    </label>
+  );
 }
 
 export default function Checkout() {
@@ -55,6 +76,28 @@ export default function Checkout() {
 
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState("");
+
+  // ---- neobonn Cash Wallet redemption ----
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [walletLoaded, setWalletLoaded] = useState(false);
+  const [useWallet, setUseWallet] = useState(false);
+  const maxWalletUsable = Math.min(walletBalance, total);
+  const walletAmount = useWallet ? maxWalletUsable : 0;
+  const payableTotal = Math.max(0, Math.round((total - walletAmount) * 100) / 100);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    (async () => {
+      try {
+        const res = await SheetsAPI.getWallet(user.email);
+        if (res.ok) setWalletBalance(res.balance || 0);
+      } catch {
+        // non-fatal — wallet redemption just stays unavailable
+      } finally {
+        setWalletLoaded(true);
+      }
+    })();
+  }, [user]);
 
   if (items.length === 0) return <Navigate to="/products" replace />;
 
@@ -128,6 +171,7 @@ export default function Checkout() {
         items,
         customer: activeAddress,
         amount: total, // display hint only — Code.gs recomputes the real charge from Products + Campaigns, never trusts this
+        walletAmount, // display hint only — Code.gs clamps this to the customer's real wallet balance
       });
 
       if (orderRes.demo) {
@@ -143,19 +187,32 @@ export default function Checkout() {
         return;
       }
 
-      const { orderId, razorpayOrderId, razorpayKeyId } = orderRes;
+      const { orderId, razorpayOrderId, razorpayKeyId, paidByWallet, payable } = orderRes;
+
+      // Fully covered by wallet balance — no gateway step needed at all.
+      if (paidByWallet) {
+        clearCart();
+        navigate("/order-success", { state: { orderId, email: activeAddress.email } });
+        return;
+      }
+
       if (!razorpayOrderId || !razorpayKeyId) {
         setError("Payment gateway is not configured yet. Please contact support.");
         setPlacing(false);
         return;
       }
 
+      // Use the server-clamped payable amount (after wallet credit) for
+      // the actual charge — never the locally computed one, since the
+      // backend is the source of truth on the customer's real balance.
+      const chargeAmount = typeof payable === "number" ? payable : total;
+
       const scriptOk = await loadRazorpayScript();
       if (!scriptOk) throw new Error("Could not load payment gateway. Check your connection.");
 
       const rzp = new window.Razorpay({
         key: razorpayKeyId,
-        amount: total * 100,
+        amount: chargeAmount * 100,
         currency: "INR",
         name: "neobonn",
         description: "Order payment",
@@ -288,7 +345,15 @@ export default function Checkout() {
             </label>
           )}
 
-          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+          <div className="border-t border-[var(--color-forest)]/10 pt-4 space-y-3">
+            {walletLoaded && (
+              <WalletRedeemToggle
+                walletBalance={walletBalance}
+                maxWalletUsable={maxWalletUsable}
+                useWallet={useWallet}
+                setUseWallet={setUseWallet}
+              />
+            )}
             {discountPercent > 0 && (
               <>
                 <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
@@ -301,9 +366,15 @@ export default function Checkout() {
                 </div>
               </>
             )}
+            {walletAmount > 0 && (
+              <div className="flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                <span>Wallet applied</span>
+                <span>− ₹{walletAmount}</span>
+              </div>
+            )}
             <div className="mt-2 flex items-center justify-between">
               <span className="font-display text-xl">Total</span>
-              <span className="font-display text-xl">₹{total}</span>
+              <span className="font-display text-xl">₹{payableTotal}</span>
             </div>
           </div>
 
@@ -313,7 +384,7 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : `Pay ₹${total}`}
+            {placing ? "Processing..." : payableTotal > 0 ? `Pay ₹${payableTotal}` : "Place order (paid by wallet)"}
           </button>
         </form>
       )}
@@ -321,7 +392,15 @@ export default function Checkout() {
       {/* ---- Pay button when a saved address is selected (form above is hidden) ---- */}
       {user && addresses.length > 0 && !addingNew && (
         <div className="mt-6 space-y-4">
-          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+          <div className="border-t border-[var(--color-forest)]/10 pt-4 space-y-3">
+            {walletLoaded && (
+              <WalletRedeemToggle
+                walletBalance={walletBalance}
+                maxWalletUsable={maxWalletUsable}
+                useWallet={useWallet}
+                setUseWallet={setUseWallet}
+              />
+            )}
             {discountPercent > 0 && (
               <>
                 <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
@@ -334,9 +413,15 @@ export default function Checkout() {
                 </div>
               </>
             )}
+            {walletAmount > 0 && (
+              <div className="flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                <span>Wallet applied</span>
+                <span>− ₹{walletAmount}</span>
+              </div>
+            )}
             <div className="mt-2 flex items-center justify-between">
               <span className="font-display text-xl">Total</span>
-              <span className="font-display text-xl">₹{total}</span>
+              <span className="font-display text-xl">₹{payableTotal}</span>
             </div>
           </div>
 
@@ -347,7 +432,7 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : `Pay ₹${total}`}
+            {placing ? "Processing..." : payableTotal > 0 ? `Pay ₹${payableTotal}` : "Place order (paid by wallet)"}
           </button>
         </div>
       )}

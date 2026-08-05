@@ -19,6 +19,18 @@
  *                 | TrackingHistory(JSON)
  *                 | OrderPlacedAt | ConfirmedAt | ShippedAt
  *                 | OutForDeliveryAt | DeliveredAt | CancelledAt
+ *                 | WalletAmountUsed
+ *
+ *    NOTE ON WALLET-AT-CHECKOUT: "WalletAmountUsed" (last column) is
+ *    how much of THIS order's total was paid from the customer's
+ *    neobonn Cash Wallet rather than Razorpay — set once at
+ *    handlePlaceOrder (clamped server-side to their real balance, see
+ *    walletBalanceFor). If it covers the full order, RazorpayPaymentId
+ *    is "WALLET" and the order is marked Paid immediately, no gateway
+ *    round-trip. If it only covers part, Razorpay is charged for the
+ *    remainder and the wallet is actually debited only once payment is
+ *    verified (handleVerifyPayment) — so an abandoned/failed payment
+ *    never leaves a customer's wallet short.
  *
  *    NOTE ON SHIPMENT TRACKING (Amazon-style, one column per stage):
  *    "Status" (column J) is the PAYMENT status (Pending/Paid).
@@ -55,7 +67,7 @@
  *                 | Type | Items(JSON) | Reason | ImageLinks(JSON)
  *                 | VideoLink | Status | RequestedAt | ReviewedAt
  *                 | AdminNote | RefundAmount | RefundStatus
- *                 | RazorpayRefundId
+ *                 | RazorpayRefundId | RefundMethod
  *
  *    NOTE ON RETURNS & EXCHANGES: customers can request a return or
  *    exchange within 7 days of delivery, and MUST attach at least one
@@ -65,10 +77,30 @@
  *    "Type" is either "Return" or "Exchange". "Status" moves
  *    Requested -> Approved/Rejected. When an admin APPROVES a "Return"
  *    request in Admin -> Returns & Refunds, a refund is triggered
- *    AUTOMATICALLY via the Razorpay Refunds API against the original
- *    payment (see processAutomaticRefund) — no manual step in the
- *    Razorpay dashboard needed. "Exchange" approvals don't move money;
+ *    AUTOMATICALLY (see processAutomaticRefund) — no manual step
+ *    needed. "RefundMethod" (chosen by the customer when submitting
+ *    the request) is either "Wallet" (credited instantly to their
+ *    neobonn Cash Wallet, see the Wallet sheet below) or "Original
+ *    Payment" (refunded to the original payment method via the
+ *    Razorpay Refunds API). "Exchange" approvals don't move money;
  *    the admin arranges the replacement shipment separately.
+ *
+ *    Wallet       | TxnId | Email | Type | Amount | Balance | Source
+ *                 | ReferenceId | Note | CreatedAt
+ *
+ *    NOTE ON THE NEOBONN CASH WALLET: a simple running ledger, one row
+ *    per movement, keyed by Email. "Type" is "Credit" (money added —
+ *    e.g. a return refunded to wallet) or "Debit" (money spent — e.g.
+ *    used to pay for an order at checkout). "Balance" is the running
+ *    balance for that Email immediately AFTER this row, so a
+ *    customer's current balance is simply the Balance value on their
+ *    most recent row (see walletBalanceFor). Customers see their
+ *    balance + history in Account -> your neobonn Cash Wallet, and can
+ *    apply available balance toward any order at Checkout. Every write
+ *    to this sheet happens from inside a caller that already holds the
+ *    script lock (handleReviewReturn / handlePlaceOrder /
+ *    handleVerifyPayment) so a balance can never be double-spent by two
+ *    concurrent requests.
  *
  *    CallbackRequests | RequestId | Name | Email | Phone | OrderId
  *                 | QueryType | Message | PreferredTime | Status
@@ -179,7 +211,7 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-05-gst-invoice-v1";
+const CODE_VERSION = "2026-08-06-cash-wallet-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
@@ -530,6 +562,8 @@ function doPost(e) {
         return jsonResponse(handleReviewReturn(payload));
       case "retryRefund":
         return jsonResponse(handleRetryRefund(payload));
+      case "getWallet":
+        return jsonResponse(handleGetWallet(payload));
       case "requestCallback":
         return jsonResponse(handleRequestCallback(payload));
       case "listCallbackRequests":
@@ -853,7 +887,93 @@ function computeAuthoritativeAmount(items) {
   return Math.round(total * 100) / 100; // avoid floating-point cent dust
 }
 
-function handlePlaceOrder({ items, customer }) {
+// ---------------- neobonn Cash Wallet ----------------
+// A simple append-only ledger in the "Wallet" sheet — see the header
+// comment at the top of this file for the column layout. Reads are
+// lock-free (a small race on a read is harmless); every WRITE below is
+// only ever called from inside a caller that already holds the script
+// lock (handlePlaceOrder, handleVerifyPayment, handleReviewReturn,
+// handleRetryRefund) so two concurrent requests can never both debit
+// the same balance.
+
+// Current balance for a customer = the Balance column on their most
+// recent Wallet row (0 if they've never had a wallet movement).
+function walletBalanceFor(email) {
+  const rows = getSheet("Wallet").getDataRange().getValues();
+  let balance = 0;
+  let latest = null;
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[0] || String(r[1]).toLowerCase() !== String(email).toLowerCase()) continue;
+    if (!latest || new Date(r[8]) >= new Date(latest[8])) latest = r;
+  }
+  if (latest) balance = Number(latest[4]) || 0;
+  return Math.round(balance * 100) / 100;
+}
+
+// Appends one ledger row. Caller must already hold the script lock.
+// Returns the new balance.
+function appendWalletTxn(email, type, amount, source, referenceId, note) {
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  const current = walletBalanceFor(email);
+  const next = type === "Credit" ? current + amt : current - amt;
+  const txnId = "WTX" + new Date().getTime() + Math.floor(Math.random() * 1000);
+  getSheet("Wallet").appendRow([
+    txnId,
+    email,
+    type,
+    amt,
+    Math.round(next * 100) / 100,
+    source || "",
+    referenceId || "",
+    note || "",
+    new Date(),
+  ]);
+  return Math.round(next * 100) / 100;
+}
+
+// Credits the wallet (refund, admin adjustment, etc). Caller must
+// already hold the script lock.
+function creditWallet(email, amount, source, referenceId, note) {
+  if (!(Number(amount) > 0)) return { ok: false, message: "Nothing to credit." };
+  const balance = appendWalletTxn(email, "Credit", amount, source, referenceId, note);
+  return { ok: true, balance };
+}
+
+// Debits the wallet (spend at checkout). Refuses to go negative.
+// Caller must already hold the script lock.
+function debitWallet(email, amount, source, referenceId, note) {
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!(amt > 0)) return { ok: false, message: "Nothing to debit." };
+  const current = walletBalanceFor(email);
+  if (amt > current + 0.005) return { ok: false, message: "Insufficient wallet balance." };
+  const balance = appendWalletTxn(email, "Debit", amt, source, referenceId, note);
+  return { ok: true, balance };
+}
+
+// Customer-facing: balance + full transaction history, newest first.
+function handleGetWallet({ email }) {
+  if (!email) return { ok: false, message: "Missing email." };
+  const rows = getSheet("Wallet").getDataRange().getValues();
+  const transactions = rows
+    .slice(1)
+    .filter((r) => r[0] && String(r[1]).toLowerCase() === String(email).toLowerCase())
+    .map((r) => ({
+      txnId: r[0],
+      type: r[2], // "Credit" | "Debit"
+      amount: r[3],
+      balance: r[4],
+      source: r[5],
+      referenceId: r[6],
+      note: r[7],
+      createdAt: r[8],
+    }))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const balance = transactions.length ? transactions[0].balance : 0;
+  return { ok: true, balance, transactions };
+}
+
+function handlePlaceOrder({ items, customer, walletAmount }) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -870,11 +990,73 @@ function handlePlaceOrder({ items, customer }) {
       return { ok: false, message: "Could not calculate order total. Please refresh and try again." };
     }
 
+    // ---- Wallet redemption: never trust a wallet amount from the
+    // browser either — clamp it to what's actually in the customer's
+    // wallet AND to the order amount itself.
+    let walletUsed = 0;
+    if (customer.email && Number(walletAmount) > 0) {
+      const walletBalance = walletBalanceFor(customer.email);
+      walletUsed = Math.min(Number(walletAmount) || 0, walletBalance, amount);
+      walletUsed = Math.round(walletUsed * 100) / 100;
+    }
+    const payable = Math.round((amount - walletUsed) * 100) / 100;
+
     const orderId = "ORD" + new Date().getTime();
+
+    // ---- Fully covered by wallet balance: no gateway round-trip
+    // needed at all. Mark the order Paid right away.
+    if (walletUsed > 0 && payable <= 0) {
+      debitWallet(customer.email, walletUsed, "Order Payment", orderId, `Wallet used for order ${orderId}`);
+
+      const initialHistory = [
+        { status: "Order Placed", note: "We've received your order.", at: new Date().toISOString() },
+      ];
+      const now = new Date();
+
+      getSheet("Orders").appendRow([
+        orderId,
+        JSON.stringify(items),
+        customer.name,
+        customer.email,
+        customer.phone,
+        customer.line1,
+        customer.city,
+        customer.pincode,
+        amount,
+        "Paid",
+        "", // RazorpayOrderId — none, paid entirely by wallet
+        "WALLET", // RazorpayPaymentId
+        now, // CreatedAt
+        "Order Placed", // TrackingStatus
+        "", // Carrier
+        "", // TrackingNumber
+        JSON.stringify(initialHistory), // TrackingHistory(JSON)
+        now, // OrderPlacedAt
+        "", // ConfirmedAt
+        "", // ShippedAt
+        "", // OutForDeliveryAt
+        "", // DeliveredAt
+        "", // CancelledAt
+        walletUsed, // WalletAmountUsed
+      ]);
+
+      deductStock(items);
+      const paidOrder = rowToOrderObject(
+        getSheet("Orders").getRange(getSheet("Orders").getLastRow(), 1, 1, 24).getValues()[0]
+      );
+      try {
+        sendOrderConfirmationEmail(paidOrder);
+      } catch (err) {
+        console.error("Order confirmation email failed: " + err.message);
+      }
+
+      return { ok: true, orderId, paidByWallet: true, walletUsed, amount };
+    }
 
     // Create a Razorpay Order via their API (requires Key Id/Secret in
     // Script Properties) so the frontend gets a valid order_id to open
-    // the Razorpay Checkout with.
+    // the Razorpay Checkout with. Only the remaining "payable" amount
+    // (after wallet credit) is charged through the gateway.
     const props = PropertiesService.getScriptProperties();
     const keyId = props.getProperty("RAZORPAY_KEY_ID");
     const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
@@ -894,7 +1076,7 @@ function handlePlaceOrder({ items, customer }) {
           "Basic " + Utilities.base64Encode(keyId + ":" + keySecret),
       },
       payload: JSON.stringify({
-        amount: amount * 100,
+        amount: payable * 100,
         currency: "INR",
         receipt: orderId,
       }),
@@ -939,9 +1121,18 @@ function handlePlaceOrder({ items, customer }) {
       "", // OutForDeliveryAt
       "", // DeliveredAt
       "", // CancelledAt
+      walletUsed, // WalletAmountUsed — debited from the wallet once payment is verified
     ]);
 
-    return { ok: true, orderId, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId };
+    return {
+      ok: true,
+      orderId,
+      razorpayOrderId: rzpOrder.id,
+      razorpayKeyId: keyId,
+      walletUsed,
+      payable,
+      amount,
+    };
   } finally {
     lock.releaseLock();
   }
@@ -1021,7 +1212,12 @@ function handleVerifyPayment({ orderId, razorpay_payment_id, razorpay_order_id, 
         if (!alreadyPaid) {
           const items = safeParse(rows[i][1], []); // Items(JSON) column
           deductStock(items);
-          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 23).getValues()[0]);
+          const email = rows[i][3];
+          const walletUsed = Number(rows[i][23]) || 0; // WalletAmountUsed column
+          if (walletUsed > 0 && email) {
+            debitWallet(email, walletUsed, "Order Payment", orderId, `Wallet used for order ${orderId}`);
+          }
+          confirmedOrder = rowToOrderObject(sheet.getRange(i + 1, 1, 1, 24).getValues()[0]);
         }
         break;
       }
@@ -1078,6 +1274,7 @@ function rowToOrderObject(r) {
     // Clean, Amazon-style per-stage timestamps — e.g. stageTimestamps.Shipped
     // is either an ISO date string or absent if not reached yet.
     stageTimestamps,
+    walletAmountUsed: Number(r[23]) || 0, // portion of this order paid from the neobonn Cash Wallet
   };
 }
 
@@ -1201,7 +1398,7 @@ function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumbe
     history.push({ status, note: note || "", at: new Date().toISOString() });
     sheet.getRange(rowIndex + 1, 17).setValue(JSON.stringify(history));
 
-    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 23).getValues()[0]);
+    updatedOrder = rowToOrderObject(sheet.getRange(rowIndex + 1, 1, 1, 24).getValues()[0]);
   } finally {
     lock.releaseLock();
   }
@@ -1577,17 +1774,19 @@ function rowToReturnObject(r) {
     refundAmount: r[14],
     refundStatus: r[15], // "Not Applicable" | "Pending" | "Processed" | "Failed"
     razorpayRefundId: r[16],
+    refundMethod: r[17] || "Original Payment", // "Wallet" | "Original Payment"
   };
 }
 
 // Customer-facing: submit a return or exchange request. Requires the
 // order to be Delivered, within the 7-day window, and at least one
 // photo + one video attached as proof.
-function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason, images, video }) {
+function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason, images, video, refundMethod }) {
   if (!orderId || !email) return { ok: false, message: "Missing order or email." };
   if (type !== "Return" && type !== "Exchange") {
     return { ok: false, message: "Please choose Return or Exchange." };
   }
+  const resolvedRefundMethod = refundMethod === "Wallet" ? "Wallet" : "Original Payment";
   if (!reason || !reason.trim()) return { ok: false, message: "Please tell us the reason." };
   if (!images || !images.length) {
     return { ok: false, message: "Please attach at least one photo of the product." };
@@ -1649,6 +1848,7 @@ function handleSubmitReturnRequest({ orderId, email, phone, type, items, reason,
     "", // RefundAmount
     type === "Return" ? "Pending" : "Not Applicable", // RefundStatus
     "", // RazorpayRefundId
+    type === "Return" ? resolvedRefundMethod : "Not Applicable", // RefundMethod
   ]);
 
   try {
@@ -1705,10 +1905,36 @@ function handleListReturns() {
 }
 
 // Refunds the value of the returned items (or the full order amount if
-// items weren't itemized) straight to the customer's original payment
-// method via the Razorpay Refunds API. This is what makes refunds
-// "automatic" — no manual step in the Razorpay dashboard.
-function processAutomaticRefund(orderId, items) {
+// items weren't itemized) either to the customer's neobonn Cash Wallet
+// (instant, no gateway involved) or straight to their original payment
+// method via the Razorpay Refunds API — whichever the customer chose
+// when submitting the request (see RefundMethod). This is what makes
+// refunds "automatic" — no manual step needed either way. Caller
+// (handleReviewReturn / handleRetryRefund) already holds the script
+// lock, so the wallet credit below is safe.
+function processAutomaticRefund(orderId, items, email, refundMethod) {
+  const itemsTotalForWallet = (items || []).reduce(
+    (sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0),
+    0
+  );
+
+  if (refundMethod === "Wallet") {
+    if (!email) return { ok: false, message: "Missing customer email — refund not processed." };
+    let amount = itemsTotalForWallet;
+    if (!(amount > 0)) {
+      const ordersSheet = getSheet("Orders");
+      const orderRow = ordersSheet
+        .getDataRange()
+        .getValues()
+        .find((r, i) => i > 0 && String(r[0]) === String(orderId));
+      amount = orderRow ? Number(orderRow[8]) : 0; // fallback: full order amount
+    }
+    if (!(amount > 0)) return { ok: false, message: "Could not calculate refund amount." };
+    const credit = creditWallet(email, amount, "Return Refund", orderId, `Refund for order ${orderId}`);
+    if (!credit.ok) return { ok: false, message: credit.message, amount };
+    return { ok: true, refundId: "WALLET", amount };
+  }
+
   try {
     const ordersSheet = getSheet("Orders");
     const orderRow = ordersSheet
@@ -1718,7 +1944,9 @@ function processAutomaticRefund(orderId, items) {
     if (!orderRow) return { ok: false, message: "Original order not found — refund not processed." };
 
     const paymentId = orderRow[11]; // RazorpayPaymentId column
-    if (!paymentId) return { ok: false, message: "No payment ID on this order — was it actually paid?" };
+    if (!paymentId || paymentId === "WALLET") {
+      return { ok: false, message: "This order wasn't paid via Razorpay — refund can't be processed to original payment method." };
+    }
 
     const props = PropertiesService.getScriptProperties();
     const keyId = props.getProperty("RAZORPAY_KEY_ID");
@@ -1764,10 +1992,13 @@ function sendReturnDecisionEmail(r) {
     ];
     if (r.adminNote) lines.push("", `Note from our team: ${r.adminNote}`);
     if (isApproved && r.type === "Return") {
+      const toWallet = r.refundMethod === "Wallet";
       lines.push(
         "",
         r.refundStatus === "Processed"
-          ? `A refund of ₹${r.refundAmount} has been initiated to your original payment method and should reflect in 5-7 business days.`
+          ? toWallet
+            ? `₹${r.refundAmount} has been credited to your neobonn Cash Wallet and is ready to use right away.`
+            : `A refund of ₹${r.refundAmount} has been initiated to your original payment method and should reflect in 5-7 business days.`
           : `We're processing your refund — you'll receive a confirmation once it's initiated.`
       );
     }
@@ -1811,6 +2042,8 @@ function handleReviewReturn({ returnId, decision, adminNote }) {
     const now = new Date();
     const type = row[5];
     const orderId = row[1];
+    const email = row[2];
+    const refundMethod = row[17] || "Original Payment";
 
     if (decision === "rejected") {
       sheet.getRange(rowIndex + 1, 11).setValue("Rejected"); // Status
@@ -1823,7 +2056,7 @@ function handleReviewReturn({ returnId, decision, adminNote }) {
       sheet.getRange(rowIndex + 1, 14).setValue(adminNote || "");
 
       if (type === "Return") {
-        refundOutcome = processAutomaticRefund(orderId, safeParse(row[6], []));
+        refundOutcome = processAutomaticRefund(orderId, safeParse(row[6], []), email, refundMethod);
         sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || ""); // RefundAmount
         sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed"); // RefundStatus
         sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || ""); // RazorpayRefundId
@@ -1866,7 +2099,7 @@ function handleRetryRefund({ returnId }) {
     if (row[10] !== "Approved") return { ok: false, message: "This request must be approved first." };
     if (row[15] === "Processed") return { ok: false, message: "This refund was already processed." };
 
-    const refundOutcome = processAutomaticRefund(row[1], safeParse(row[6], []));
+    const refundOutcome = processAutomaticRefund(row[1], safeParse(row[6], []), row[2], row[17] || "Original Payment");
     sheet.getRange(rowIndex + 1, 15).setValue(refundOutcome.amount || "");
     sheet.getRange(rowIndex + 1, 16).setValue(refundOutcome.ok ? "Processed" : "Failed");
     sheet.getRange(rowIndex + 1, 17).setValue(refundOutcome.refundId || "");

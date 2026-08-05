@@ -305,11 +305,12 @@ export default function AdminDashboard() {
             `Approved, but the automatic refund failed: ${res.refundError}. Use "Retry refund" below once resolved.`
           );
         } else if (decision === "approved" && res.returnRequest?.type === "Return") {
+          const dest = res.returnRequest.refundMethod === "Wallet" ? "the customer's neobonn Cash Wallet" : "the original payment method";
           flashMessage(
             setReturnActionMsg,
             returnId,
             "success",
-            `Return approved ✅ — refund of ₹${res.returnRequest.refundAmount} processed and customer notified by email.`
+            `Return approved ✅ — refund of ₹${res.returnRequest.refundAmount} credited to ${dest} and customer notified by email.`
           );
         } else if (decision === "approved") {
           flashMessage(setReturnActionMsg, returnId, "success", "Exchange approved ✅ — customer notified by email.");
@@ -1156,6 +1157,11 @@ export default function AdminDashboard() {
                           }`}
                         >
                           Refund: {r.refundStatus}
+                        </span>
+                      )}
+                      {r.type === "Return" && (
+                        <span className="rounded-full bg-[var(--color-forest)]/10 px-3 py-1 text-xs font-semibold text-[var(--color-forest-dark)]">
+                          {r.refundMethod === "Wallet" ? "→ Wallet" : "→ Original payment"}
                         </span>
                       )}
                     </div>

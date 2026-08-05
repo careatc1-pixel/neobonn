@@ -1,5 +1,46 @@
 # Changes in this update
 
+## 0. Added: neobonn Cash Wallet — real balance, refund-to-wallet, spend at checkout
+A working wallet, not a placeholder — shown right below the "neobonn Gift
+Cards" (still Coming Soon) card on `/account`.
+
+- **Customers** see their real balance and full transaction history
+  (Account -> neobonn Cash Wallet), can choose "Refund to Wallet" instead
+  of the original payment method when submitting a Return request, and
+  can apply their balance toward any order at Checkout (partially or in
+  full — if it covers the whole order, checkout skips the Razorpay
+  gateway entirely).
+- **Admin**: approving a "Return" whose customer chose Wallet now credits
+  it instantly (no Razorpay involved) instead of calling the Refunds API;
+  the Returns & Refunds tab shows a small "→ Wallet" / "→ Original
+  payment" badge per request so you can tell at a glance.
+- Wallet debits at checkout only happen once a payment is actually
+  confirmed (or immediately, for a wallet-only order) — an abandoned or
+  failed Razorpay payment never leaves a customer's wallet short. All
+  balance math is clamped and re-verified server-side in Code.gs; the
+  browser's numbers are never trusted, same as order pricing.
+
+### ⚠️ Manual step required: add a new "Wallet" sheet + 1 new Orders column + redeploy Code.gs
+1. In your Google Sheet, add a new tab named exactly **Wallet** with this
+   header row:
+   ```
+   TxnId | Email | Type | Amount | Balance | Source | ReferenceId | Note | CreatedAt
+   ```
+2. On the **Orders** tab, add one new column right after `CancelledAt`:
+   ```
+   X: WalletAmountUsed
+   ```
+3. On the **Returns** tab, add one new column right after
+   `RazorpayRefundId`:
+   ```
+   R: RefundMethod
+   ```
+4. Re-paste `google-apps-script/Code.gs` into Extensions -> Apps Script
+   and re-deploy (Deploy -> Manage deployments -> Edit -> New version).
+
+No changes needed to Script Properties — it reuses the same Razorpay keys
+already configured for orders/refunds.
+
 ## 1. Fixed: cart was shared across all users
 `src/context/CartContext.jsx` used one fixed localStorage key
 (`neobonn_cart`) for everyone. Any user signed in on the same browser saw

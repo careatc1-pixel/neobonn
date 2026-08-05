@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import {
   Package, ChevronDown, ChevronRight, RotateCcw, MessageCircle,
   Heart, Gift, UserRound, ShoppingBag, MapPinned, Star,
+  Wallet, ArrowDownLeft, ArrowUpRight,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
@@ -88,6 +89,37 @@ function QuickActionCard({ icon: Icon, label, onClick }) {
   );
 }
 
+function WalletTxnRow({ txn }) {
+  const isCredit = txn.type === "Credit";
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--color-forest)]/8 px-4 py-3 last:border-b-0">
+      <div
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+          isCredit ? "bg-green-100" : "bg-[var(--color-forest)]/10"
+        }`}
+      >
+        {isCredit ? (
+          <ArrowDownLeft size={16} className="text-green-700" />
+        ) : (
+          <ArrowUpRight size={16} className="text-[var(--color-forest-dark)]" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--color-charcoal)]">
+          {txn.source || (isCredit ? "Wallet credit" : "Wallet debit")}
+        </p>
+        <p className="text-xs text-[var(--color-charcoal)]/50">
+          {txn.createdAt ? new Date(txn.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}
+          {txn.referenceId ? ` · ${txn.referenceId}` : ""}
+        </p>
+      </div>
+      <span className={`shrink-0 text-sm font-semibold ${isCredit ? "text-green-700" : "text-[var(--color-charcoal)]"}`}>
+        {isCredit ? "+" : "−"}₹{txn.amount}
+      </span>
+    </div>
+  );
+}
+
 function InfoRow({ icon: Icon, label, badge, onClick }) {
   return (
     <button
@@ -124,6 +156,12 @@ export default function Account() {
   const [returnModalOrder, setReturnModalOrder] = useState(null);
   const [movedToBag, setMovedToBag] = useState(null);
 
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [walletTxns, setWalletTxns] = useState([]);
+  const [walletLoaded, setWalletLoaded] = useState(false);
+  const [walletDemoMode, setWalletDemoMode] = useState(false);
+  const [walletExpanded, setWalletExpanded] = useState(false);
+
   const loadReturns = async () => {
     if (!user?.email) return;
     try {
@@ -137,6 +175,23 @@ export default function Account() {
       // non-fatal — the returns section just stays empty
     } finally {
       setReturnsLoaded(true);
+    }
+  };
+
+  const loadWallet = async () => {
+    if (!user?.email) return;
+    try {
+      const res = await SheetsAPI.getWallet(user.email);
+      if (res.demo) {
+        setWalletDemoMode(true);
+      } else if (res.ok) {
+        setWalletBalance(res.balance || 0);
+        setWalletTxns(res.transactions || []);
+      }
+    } catch {
+      // non-fatal — the wallet card just stays at ₹0
+    } finally {
+      setWalletLoaded(true);
     }
   };
 
@@ -161,6 +216,7 @@ export default function Account() {
       }
     })();
     loadReturns();
+    loadWallet();
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!user) return <Navigate to="/login" replace />;
@@ -214,11 +270,63 @@ export default function Account() {
         </span>
       </div>
 
+      {/* ---- neobonn Cash Wallet — real balance, backed by the Wallet sheet ---- */}
+      <div id="wallet" className="mt-4 scroll-mt-6 overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
+        <button
+          onClick={() => setWalletExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-forest-dark)]/10">
+              <Wallet size={18} className="text-[var(--color-forest-dark)]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-charcoal)]">neobonn Cash Wallet</p>
+              <p className="text-xs text-[var(--color-charcoal)]/50">
+                {walletDemoMode
+                  ? "Connect the backend to activate"
+                  : "Refunds land here instantly · usable at checkout"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-display text-lg text-[var(--color-forest-dark)]">
+              ₹{walletLoaded ? walletBalance : "..."}
+            </span>
+            <ChevronDown size={16} className={`text-[var(--color-charcoal)]/40 transition-transform ${walletExpanded ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+
+        {walletExpanded && (
+          <div className="border-t border-[var(--color-forest)]/10">
+            {walletDemoMode && (
+              <p className="px-5 py-4 text-sm text-amber-800">
+                Demo mode: connect the Google Sheets backend to see your real wallet balance and history here.
+              </p>
+            )}
+            {!walletDemoMode && walletLoaded && walletTxns.length === 0 && (
+              <p className="px-5 py-6 text-center text-sm text-[var(--color-charcoal)]/50">
+                No wallet activity yet — approved return refunds can be credited here instead of your
+                original payment method.
+              </p>
+            )}
+            {!walletDemoMode && walletTxns.length > 0 && (
+              <div>
+                {walletTxns.map((txn) => (
+                  <WalletTxnRow key={txn.txnId} txn={txn} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ---- Your Information list ---- */}
       <div className="mt-8">
         <h2 className="px-1 font-display text-lg text-[var(--color-forest-dark)]">Your Information</h2>
         <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
           <InfoRow icon={RotateCcw} label="Your Refunds" onClick={() => scrollToSection("refunds")} />
+          <InfoRow icon={Wallet} label="neobonn Cash Wallet" onClick={() => { setWalletExpanded(true); scrollToSection("wallet"); }} />
           <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => scrollToSection("addresses")} />
           <InfoRow icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
           <InfoRow icon={Gift} label="E-Gift Cards" badge="Soon" />
