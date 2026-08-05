@@ -27,14 +27,11 @@ function writeCart(key, items) {
 function mergeCarts(base, incoming) {
   const merged = [...base];
   incoming.forEach((inc) => {
-    const idx = merged.findIndex((i) => i.id === inc.id);
-    if (idx !== -1) {
-      const existing = merged[idx];
+    const existing = merged.find((i) => i.id === inc.id);
+    if (existing) {
       const stock = Number(inc.stock ?? existing.stock ?? Infinity);
-      // Replace with a new object instead of mutating `existing` in place —
-      // `existing` came from `base` (spread, not deep-cloned), so mutating
-      // it directly was quietly editing state outside of setItems.
-      merged[idx] = { ...existing, stock, qty: Math.min(stock, existing.qty + inc.qty) };
+      existing.qty = Math.min(stock, existing.qty + inc.qty);
+      existing.stock = stock;
     } else {
       merged.push(inc);
     }
@@ -117,16 +114,4 @@ export function CartProvider({ children }) {
   );
 }
 
-export const useCart = () => {
-  const ctx = useContext(CartContext);
-  if (!ctx) {
-    // Same guard as useWishlist() — prevents a hard crash (destructuring
-    // `items` off null) if this ever renders outside <CartProvider>.
-    console.error("useCart() called outside <CartProvider> — cart data unavailable.");
-    return {
-      items: [], addItem: () => {}, removeItem: () => {}, updateQty: () => {},
-      clearCart: () => {}, subtotal: 0, count: 0,
-    };
-  }
-  return ctx;
-};
+export const useCart = () => useContext(CartContext);

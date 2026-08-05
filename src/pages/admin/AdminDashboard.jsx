@@ -134,6 +134,16 @@ export default function AdminDashboard() {
   const [callbackNoteDrafts, setCallbackNoteDrafts] = useState({}); // { [requestId]: adminNote }
   const [callbackActionMsg, setCallbackActionMsg] = useState({}); // { [requestId]: { type, text } }
 
+  // ---- Banners & Offers (Campaigns) tab state ----
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  const [campaignsError, setCampaignsError] = useState("");
+  const [campaignEditing, setCampaignEditing] = useState(null); // draft object being created/edited, or null
+  const [campaignSaving, setCampaignSaving] = useState(false);
+  const [campaignActionId, setCampaignActionId] = useState(null); // id currently being toggled/deleted
+  const [campaignActionMsg, setCampaignActionMsg] = useState({}); // { [id]: { type, text } }
+
   useEffect(() => {
     (async () => {
       try {
@@ -349,6 +359,106 @@ export default function AdminDashboard() {
     }, 6000);
   };
 
+  // ---- Banners & Offers (Campaigns) ----
+  const loadCampaigns = async () => {
+    setCampaignsLoading(true);
+    setCampaignsError("");
+    try {
+      const res = await SheetsAPI.listCampaigns();
+      if (res.ok) {
+        setCampaigns(res.campaigns || []);
+      } else {
+        setCampaignsError(res.message || "Couldn't load campaigns.");
+      }
+    } catch (err) {
+      setCampaignsError(err.message || "Couldn't load campaigns.");
+    } finally {
+      setCampaignsLoading(false);
+      setCampaignsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "campaigns" && !campaignsLoaded && !campaignsLoading) {
+      loadCampaigns();
+    }
+  }, [tab, campaignsLoaded, campaignsLoading]);
+
+  const emptyCampaign = {
+    id: "",
+    name: "",
+    active: false,
+    discountPercent: "",
+    heroImage: "",
+    heroTitle: "",
+    heroSubtitle: "",
+    stripText: "",
+    ctaLink: "/products",
+  };
+
+  const saveCampaign = async () => {
+    if (!campaignEditing?.name?.trim()) return;
+    setCampaignSaving(true);
+    try {
+      const res = await SheetsAPI.upsertCampaign({
+        ...campaignEditing,
+        discountPercent: Number(campaignEditing.discountPercent) || 0,
+      });
+      if (res.ok) {
+        setCampaigns(res.campaigns || []);
+        setCampaignEditing(null);
+      } else {
+        flashMessage(setCampaignActionMsg, campaignEditing.id || "new", "error", res.message || "Couldn't save this campaign.");
+      }
+    } catch (err) {
+      flashMessage(setCampaignActionMsg, campaignEditing.id || "new", "error", err.message || "Couldn't save this campaign.");
+    } finally {
+      setCampaignSaving(false);
+    }
+  };
+
+  // One click to switch which occasion is live — flips this campaign's
+  // Active flag; the backend auto-deactivates every other campaign in
+  // the same call, so exactly one is ever live at a time.
+  const toggleCampaignActive = async (campaign) => {
+    setCampaignActionId(campaign.id);
+    try {
+      const res = await SheetsAPI.upsertCampaign({ ...campaign, active: !campaign.active });
+      if (res.ok) {
+        setCampaigns(res.campaigns || []);
+        flashMessage(
+          setCampaignActionMsg,
+          campaign.id,
+          "success",
+          !campaign.active ? `"${campaign.name}" is now live on the site.` : `"${campaign.name}" is no longer live.`
+        );
+      } else {
+        flashMessage(setCampaignActionMsg, campaign.id, "error", res.message || "Couldn't update this campaign.");
+      }
+    } catch (err) {
+      flashMessage(setCampaignActionMsg, campaign.id, "error", err.message || "Couldn't update this campaign.");
+    } finally {
+      setCampaignActionId(null);
+    }
+  };
+
+  const deleteCampaign = async (campaign) => {
+    if (!confirm(`Delete "${campaign.name}"? This can't be undone.`)) return;
+    setCampaignActionId(campaign.id);
+    try {
+      const res = await SheetsAPI.deleteCampaign(campaign.id);
+      if (res.ok) {
+        setCampaigns(res.campaigns || []);
+      } else {
+        flashMessage(setCampaignActionMsg, campaign.id, "error", res.message || "Couldn't delete this campaign.");
+      }
+    } catch (err) {
+      flashMessage(setCampaignActionMsg, campaign.id, "error", err.message || "Couldn't delete this campaign.");
+    } finally {
+      setCampaignActionId(null);
+    }
+  };
+
   const draftFor = (order) =>
     orderDrafts[order.orderId] || {
       status: order.trackingStatus || "Order Placed",
@@ -392,7 +502,8 @@ export default function AdminDashboard() {
             setOrderActionMsg,
             order.orderId,
             "success",
-            `Shipment updated to "${draft.status}" ✅ — customer notified by email.`
+            `Shipment updated to "${draft.status}" ✅ — customer notified by email.` +
+              (res.invoiceNumber ? ` GST invoice ${res.invoiceNumber} attached.` : "")
           );
         }
       } else {
@@ -564,6 +675,8 @@ export default function AdminDashboard() {
             ? "Returns & Refunds"
             : tab === "helpdesk"
             ? "Help Desk"
+            : tab === "campaigns"
+            ? "Banners & Offers"
             : "Error Logs"}
         </h1>
         <button onClick={logout} className="text-sm font-medium text-red-600 hover:underline">
@@ -603,6 +716,14 @@ export default function AdminDashboard() {
           }`}
         >
           Help Desk
+        </button>
+        <button
+          onClick={() => setTab("campaigns")}
+          className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "campaigns" ? "bg-[var(--color-forest-dark)] text-white" : "text-[var(--color-forest-dark)]"
+          }`}
+        >
+          Banners &amp; Offers
         </button>
         <button
           onClick={() => setTab("errors")}
@@ -1202,7 +1323,7 @@ export default function AdminDashboard() {
             {callbacks.map((c) => {
               const isOpen = expandedCallbackId === c.requestId;
               const busy = callbackActionId === c.requestId;
-              const digitsOnly = (c.phone || "").replace(/\D/g, "");
+              const digitsOnly = String(c.phone || "").replace(/\D/g, "");
               const waNumber = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
               return (
                 <div key={c.requestId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
@@ -1303,6 +1424,228 @@ export default function AdminDashboard() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {tab === "campaigns" && (
+        <div className="mt-6">
+          <p className="max-w-2xl text-sm text-[var(--color-charcoal)]/70">
+            Switch the homepage banner and sitewide discount to match whatever's
+            happening right now — Diwali, Monsoon Sale, a new launch, or nothing
+            at all. Only one campaign can be live at a time; making one live
+            automatically takes the previous one down.
+          </p>
+
+          {campaignsError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {campaignsError}
+              <button onClick={loadCampaigns} className="ml-3 font-semibold underline">
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!campaignEditing && (
+            <button
+              onClick={() => setCampaignEditing(emptyCampaign)}
+              className="mt-4 rounded-full bg-[var(--color-forest-dark)] px-6 py-2.5 text-sm font-semibold text-white"
+            >
+              + New Campaign
+            </button>
+          )}
+
+          {campaignEditing && (
+            <div className="mt-6 rounded-xl border border-[var(--color-forest)]/15 p-5">
+              <h3 className="font-display text-lg text-[var(--color-forest-dark)]">
+                {campaignEditing.id ? "Edit Campaign" : "New Campaign"}
+              </h3>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">
+                    Campaign name (internal label)
+                  </span>
+                  <input
+                    value={campaignEditing.name}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, name: e.target.value })}
+                    placeholder="e.g. Diwali Dhamaka"
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">
+                    Discount % (0 = announcement only, no discount)
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="90"
+                    value={campaignEditing.discountPercent}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, discountPercent: e.target.value })}
+                    placeholder="e.g. 40"
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">
+                    Top strip text (thin bar on every page — leave blank to hide it)
+                  </span>
+                  <input
+                    value={campaignEditing.stripText}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, stripText: e.target.value })}
+                    placeholder='e.g. "Flat 40% OFF — Diwali Sale, this week only"'
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">
+                    Hero banner image URL (optional — a public image link fully
+                    replaces the default design; leave blank to use the built-in
+                    look with the title/subtitle below)
+                  </span>
+                  <input
+                    value={campaignEditing.heroImage}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, heroImage: e.target.value })}
+                    placeholder="https://..."
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">Hero title</span>
+                  <input
+                    value={campaignEditing.heroTitle}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, heroTitle: e.target.value })}
+                    placeholder="e.g. This Diwali, Glow Brighter"
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">Hero subtitle</span>
+                  <input
+                    value={campaignEditing.heroSubtitle}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, heroSubtitle: e.target.value })}
+                    placeholder="A short supporting line"
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1 block font-medium text-[var(--color-charcoal)]/70">
+                    "Shop the Sale" button links to
+                  </span>
+                  <input
+                    value={campaignEditing.ctaLink}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, ctaLink: e.target.value })}
+                    placeholder="/products"
+                    className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-2.5 text-sm"
+                  />
+                </label>
+
+                <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={!!campaignEditing.active}
+                    onChange={(e) => setCampaignEditing({ ...campaignEditing, active: e.target.checked })}
+                    className="h-4 w-4 rounded border-[var(--color-forest)]/30"
+                  />
+                  Make this campaign live immediately (turns off whichever one is live now)
+                </label>
+              </div>
+
+              <div className="mt-5 flex gap-3">
+                <button
+                  onClick={saveCampaign}
+                  disabled={campaignSaving || !campaignEditing.name.trim()}
+                  className="rounded-full bg-[var(--color-forest-dark)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {campaignSaving ? "Saving..." : "Save Campaign"}
+                </button>
+                <button
+                  onClick={() => setCampaignEditing(null)}
+                  className="rounded-full border border-[var(--color-forest)]/30 px-6 py-2.5 text-sm font-semibold text-[var(--color-forest-dark)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-8 space-y-3">
+            {campaignsLoading && !campaignsLoaded && (
+              <p className="text-sm text-[var(--color-charcoal)]/50">Loading campaigns...</p>
+            )}
+            {campaignsLoaded && campaigns.length === 0 && !campaignsError && (
+              <p className="text-sm text-[var(--color-charcoal)]/50">
+                No campaigns yet — create one above to control the homepage banner and sitewide discount.
+              </p>
+            )}
+            {campaigns.map((c) => (
+              <div
+                key={c.id}
+                className={`rounded-xl border p-4 ${
+                  c.active ? "border-[var(--color-forest)]/40 bg-[var(--color-cream-deep)]/60" : "border-[var(--color-forest)]/10"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{c.name}</span>
+                      {c.active && (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                          Live now
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-[var(--color-charcoal)]/50">
+                      {c.discountPercent > 0 ? `${c.discountPercent}% off` : "No discount — banner only"}
+                      {c.stripText ? " · has a top strip" : ""}
+                      {c.heroImage ? " · custom hero image" : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleCampaignActive(c)}
+                      disabled={campaignActionId === c.id}
+                      className={`rounded-full px-4 py-1.5 text-xs font-semibold disabled:opacity-60 ${
+                        c.active
+                          ? "border border-red-200 text-red-600"
+                          : "bg-[var(--color-forest-dark)] text-white"
+                      }`}
+                    >
+                      {c.active ? "Take Down" : "Make Live"}
+                    </button>
+                    <button
+                      onClick={() => setCampaignEditing(c)}
+                      className="text-xs font-medium text-[var(--color-forest-dark)] hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteCampaign(c)}
+                      disabled={campaignActionId === c.id}
+                      className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                {campaignActionMsg[c.id] && (
+                  <p
+                    className={`mt-2 text-xs ${
+                      campaignActionMsg[c.id].type === "success" ? "text-green-700" : "text-red-600"
+                    }`}
+                  >
+                    {campaignActionMsg[c.id].text}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

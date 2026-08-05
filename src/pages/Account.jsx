@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
-  Package, ChevronDown, ChevronRight, ChevronLeft, RotateCcw, MessageCircle,
+  Package, ChevronDown, ChevronRight, RotateCcw, MessageCircle,
   Heart, Gift, UserRound, ShoppingBag, MapPinned, Star,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -172,28 +172,16 @@ export default function Account() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-6 md:px-8 md:py-10">
+    <div className="mx-auto max-w-3xl px-5 py-10 md:px-8">
       <SEO title="My Account" path="/account" noindex />
-
-      {/* ---- Page title bar (back + "Profile") ---- */}
-      <div className="mb-5 flex items-center gap-3 md:hidden">
-        <button
-          onClick={() => navigate(-1)}
-          aria-label="Go back"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-forest)]/15 bg-white text-[var(--color-forest-dark)]"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <h1 className="font-display text-xl text-[var(--color-forest-dark)]">Profile</h1>
-      </div>
 
       {/* ---- Profile header ---- */}
       <div className="flex items-center gap-4 rounded-2xl border border-[var(--color-forest)]/10 bg-white p-5">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[var(--color-forest-dark)]/10">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[var(--color-forest)]/10">
           <UserRound size={30} className="text-[var(--color-forest-dark)]" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-display text-2xl text-[var(--color-forest-dark)]">{user.name}</h2>
+          <h1 className="truncate font-display text-2xl text-[var(--color-forest-dark)]">{user.name}</h1>
           <p className="mt-0.5 text-sm text-[var(--color-charcoal)]/60">{user.phone || user.email}</p>
         </div>
         <button
@@ -205,33 +193,25 @@ export default function Account() {
       </div>
 
       {/* ---- Quick action cards ---- */}
-      <div className="mt-4 grid grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <QuickActionCard icon={ShoppingBag} label="Your Orders" onClick={() => scrollToSection("orders")} />
+        <QuickActionCard icon={MapPinned} label="Addresses" onClick={() => scrollToSection("addresses")} />
         <QuickActionCard icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
         <QuickActionCard icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
       </div>
 
       {/* ---- Gift cards banner (not wired to real money yet — see CHANGES.md) ---- */}
-      <button
-        onClick={() => scrollToSection("gift-cards")}
-        className="mt-4 flex w-full items-center justify-between rounded-2xl border border-[var(--color-gold)]/25 bg-gradient-to-r from-[var(--color-forest-dark)]/8 to-[var(--color-gold)]/15 px-5 py-4 text-left"
-      >
+      <div className="mt-4 flex items-center justify-between rounded-2xl border border-[var(--color-gold)]/25 bg-gradient-to-r from-[var(--color-forest-dark)]/5 to-[var(--color-gold)]/10 px-5 py-4">
         <div className="flex items-center gap-3">
           <Gift size={20} className="text-[var(--color-forest-dark)]" />
-          <p className="text-sm font-semibold text-[var(--color-charcoal)]">neobonn Cash & Gift Card</p>
+          <div>
+            <p className="text-sm font-semibold text-[var(--color-charcoal)]">neobonn Gift Cards</p>
+            <p className="text-xs text-[var(--color-charcoal)]/50">Coming soon</p>
+          </div>
         </div>
-        <ChevronRight size={18} className="text-[var(--color-charcoal)]/40" />
-      </button>
-      <div id="gift-cards" className="-mt-3 flex scroll-mt-6 items-center justify-between rounded-b-2xl border border-t-0 border-[var(--color-gold)]/25 bg-white px-5 py-3">
-        <p className="text-sm text-[var(--color-charcoal)]/60">
-          Available Balance <span className="font-semibold text-[var(--color-charcoal)]">₹0</span>
-        </p>
-        <button
-          onClick={() => alert("Gift cards & wallet balance are coming soon!")}
-          className="rounded-full border border-[var(--color-forest-dark)]/20 bg-white px-4 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)]"
-        >
-          Add Balance
-        </button>
+        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-charcoal)]/50">
+          Coming Soon
+        </span>
       </div>
 
       {/* ---- Your Information list ---- */}
@@ -239,9 +219,9 @@ export default function Account() {
         <h2 className="px-1 font-display text-lg text-[var(--color-forest-dark)]">Your Information</h2>
         <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
           <InfoRow icon={RotateCcw} label="Your Refunds" onClick={() => scrollToSection("refunds")} />
+          <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => scrollToSection("addresses")} />
           <InfoRow icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
           <InfoRow icon={Gift} label="E-Gift Cards" badge="Soon" />
-          <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => scrollToSection("addresses")} />
           <InfoRow icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
         </div>
       </div>
@@ -389,7 +369,7 @@ export default function Account() {
             {wishlistItems.map((item) => (
               <div key={item.id} className="overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
                 <div className="aspect-square overflow-hidden bg-[var(--color-cream-deep)]">
-                  <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
                 </div>
                 <div className="p-3">
                   <p className="truncate text-sm font-medium text-[var(--color-charcoal)]">{item.name}</p>

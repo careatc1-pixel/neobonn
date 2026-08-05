@@ -74,6 +74,51 @@
  *                 | QueryType | Message | PreferredTime | Status
  *                 | RequestedAt | ResolvedAt | AdminNote
  *
+ *    Addresses    | AddressId | Email | Label | Name | Phone | Line1
+ *                 | Line2 | City | State | Pincode | Lat | Lng
+ *                 | IsDefault | CreatedAt | UpdatedAt
+ *
+ *    Campaigns    | Id | Name | Active | DiscountPercent | HeroImage
+ *                 | HeroTitle | HeroSubtitle | StripText | CtaLink
+ *                 | CreatedAt | UpdatedAt
+ *
+ *    NOTE ON CAMPAIGNS (Admin -> Banners & Offers): lets you switch the
+ *    homepage banner + sitewide discount to match whatever's happening
+ *    right now (Diwali, Monsoon Sale, a new launch, nothing at all) —
+ *    no code changes, no redeploy. Only ONE campaign can be Active at a
+ *    time; marking one Active automatically turns the rest off
+ *    (handleUpsertCampaign does this). "DiscountPercent" (0-90) is
+ *    applied EVERYWHERE prices are shown (product cards, product page,
+ *    cart, checkout) and — critically — is recomputed from THIS sheet
+ *    on the server when an order is actually charged
+ *    (computeAuthoritativeAmount), never trusted from the browser, for
+ *    the same reason the order amount itself isn't trusted from the
+ *    browser (see SECURITY NOTE below). "HeroImage" is optional — paste
+ *    a public image URL (e.g. from Google Drive, sharing set to
+ *    "Anyone with the link") to replace the default hero design with
+ *    your own banner graphic; leave it blank to keep the built-in
+ *    design with your Hero Title/Subtitle text overlaid instead.
+ *    "StripText" is the thin announcement bar at the very top of every
+ *    page (e.g. "Flat 40% OFF — Diwali Sale, this week only"); leave it
+ *    blank to hide that strip. If no campaign is Active at all, both
+ *    the hero banner and the top strip are hidden automatically and
+ *    every price shown is the plain, undiscounted price — the site
+ *    never shows a sale that isn't actually live.
+ *
+ *    NOTE ON SAVED ADDRESSES (multi-address "deliver here" book): one
+ *    signed-in customer (matched by Email) can save several delivery
+ *    addresses — e.g. Home, Work, Mom's place — and pick one at
+ *    checkout instead of retyping it every time. "Lat"/"Lng" are
+ *    filled in automatically when the customer taps "Use my current
+ *    location" on the address form (browser geolocation, reverse-
+ *    geocoded client-side to a street address via OpenStreetMap's free
+ *    Nominatim API — no Google Maps billing needed) — they're stored
+ *    only as a reference point for that address, not used to restrict
+ *    where someone can order from. "IsDefault" marks the one address
+ *    that's pre-selected at checkout; only one row per Email may have
+ *    IsDefault = TRUE at a time (handled automatically whenever an
+ *    address is saved or set as default).
+ *
  *    NOTE ON THE HELP DESK / CALLBACK REQUESTS: the storefront's chat
  *    widget (bottom-right "Need help?" bubble) lets a customer pick an
  *    order + describe their issue, then choose either "Chat on
@@ -116,6 +161,15 @@
  * simplicity. Before going live, hash passwords (e.g. with a salted
  * SHA-256 via Utilities.computeDigest) before writing to the sheet,
  * and compare hashes on login instead of raw text.
+ *
+ * GST INVOICE ON DELIVERY: when an order is marked "Delivered" (Admin
+ * -> Orders), a GST tax invoice PDF is generated and attached to the
+ * delivery email automatically — no separate action needed. Before
+ * going live, fill in your real business details in the "GST Invoice"
+ * constants below (SELLER_LEGAL_NAME, SELLER_ADDRESS, SELLER_GSTIN,
+ * SELLER_STATE_NAME, SELLER_PINCODE_PREFIX, GST_RATE_PERCENT). If
+ * SELLER_GSTIN is left blank the invoice still sends (so a delivery
+ * email is never blocked on this), just without a GSTIN printed on it.
  * ------------------------------------------------------------------
  */
 
@@ -125,10 +179,191 @@ const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
 // that the LIVE deployment is actually running this file, by visiting
 // your deployment URL (as a GET) or checking the "ping" action's
 // response. Prevents "did my redeploy actually take effect?" confusion.
-const CODE_VERSION = "2026-08-02-helpdesk-v1";
+const CODE_VERSION = "2026-08-05-gst-invoice-v1";
 
 function getSheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
+}
+
+// ---------------- GST Invoice (auto-sent when an order is marked Delivered) ----------------
+// Fill these in with your real business details before going live — the
+// invoice PDF is generated straight from these constants. If you leave
+// SELLER_GSTIN blank, the invoice still sends (so a delivery email is
+// never blocked), but it prints "GSTIN: Not registered / not set" —
+// fine if you're a small seller without GST registration yet, but
+// update this the moment you have a GSTIN.
+const SELLER_LEGAL_NAME = "Atharv Luxe Co.";
+const SELLER_ADDRESS = "Block B-2, House No. 239, Paschim Vihar, New Delhi - 110063";
+const SELLER_GSTIN = ""; // e.g. "07ABCDE1234F1Z5" — from your GST registration certificate
+const SELLER_STATE_NAME = "Delhi";
+const SELLER_PINCODE_PREFIX = "110"; // Delhi PINs start with 110 — used only to decide CGST+SGST (buyer in Delhi) vs IGST (buyer elsewhere). This is an approximation from PIN code, not a stored customer state — accurate for the vast majority of addresses, but if you ever see a Delhi order taxed as IGST (or vice versa) because of an edge-case PIN, this is why.
+const GST_RATE_PERCENT = 18; // change if your products fall under a different GST slab
+const INVOICE_HSN_CODE = "3304"; // generic HSN for cosmetic/skincare preparations — override here if your products fall under a different HSN
+
+// NOTE: this generates a standard-format tax invoice (seller GSTIN,
+// invoice number, HSN, taxable value, CGST/SGST/IGST breakup) but isn't
+// a substitute for your accountant/CA signing off on your specific GST
+// compliance setup (e-invoicing thresholds, numbering rules, etc.) —
+// worth a quick review with them before relying on this for filing.
+//
+// IMPORTANT: this invoice's taxable-value math is derived from each
+// item's ORIGINAL price × qty (as stored on the order), NOT from the
+// discounted order.amount that campaigns may apply — so if a discount
+// was active on the order being invoiced, the invoice total intentionally
+// still reflects the undiscounted line prices reconciled against
+// order.amount (see generateGstInvoicePdf) rather than showing a
+// mismatched total.
+
+// Invoice numbers must be sequential within a financial year for GST
+// compliance — this keeps a running counter in Script Properties
+// (survives redeploys, since it's not part of the code) rather than in
+// a sheet, so it can never collide with a concurrent order.
+function getNextInvoiceNumber() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const fy = getIndianFinancialYearLabel(new Date());
+    const key = "invoiceSeq_" + fy;
+    const next = (parseInt(props.getProperty(key) || "0", 10) || 0) + 1;
+    props.setProperty(key, String(next));
+    return "INV/" + fy + "/" + String(next).padStart(5, "0");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Indian financial year runs Apr 1 -> Mar 31, e.g. a March 2027 order
+// is FY "2026-27", not "2027-28".
+function getIndianFinancialYearLabel(date) {
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const startYear = m >= 4 ? y : y - 1;
+  return startYear + "-" + String((startYear + 1) % 100).padStart(2, "0");
+}
+
+function isIntraStateOrder(pincode) {
+  return String(pincode || "").trim().indexOf(SELLER_PINCODE_PREFIX) === 0;
+}
+
+function escapeHtmlForInvoice(str) {
+  return String(str == null ? "" : str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Builds the invoice as HTML, then converts it to PDF using Apps
+// Script's built-in blob conversion (the same engine Google Docs uses
+// to "print to PDF") — no external service, no extra API keys needed.
+// Table-based layout on purpose: the HTML->PDF converter doesn't
+// reliably support flexbox/grid, but table layouts render consistently.
+//
+// The GST breakup is computed from order.amount (the server-verified,
+// already-discounted total that was actually charged — see
+// computeAuthoritativeAmount) rather than summing each item's stored
+// price × qty, which can be the pre-discount price. Each line's
+// taxable value is scaled proportionally so the invoice's grand total
+// always exactly matches what the customer was charged.
+function buildGstInvoiceHtml(order, invoiceNumber) {
+  const items = order.items || [];
+  const intraState = isIntraStateOrder(order.pincode);
+  const rate = GST_RATE_PERCENT;
+
+  const rawTotal = items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+  const chargedTotal = Number(order.amount) || rawTotal;
+  // Scales each line to the actually-charged total (handles a campaign
+  // discount having been applied); falls back to 1 (no scaling) if the
+  // stored item prices already sum to the charged amount, or if there's
+  // nothing to scale against.
+  const scale = rawTotal > 0 ? chargedTotal / rawTotal : 1;
+
+  let taxableTotal = 0;
+  let taxTotal = 0;
+  const itemRows = items
+    .map((it) => {
+      const lineTotal = (Number(it.price) || 0) * (Number(it.qty) || 0) * scale; // GST-inclusive, discount-adjusted
+      const taxable = lineTotal / (1 + rate / 100);
+      const tax = lineTotal - taxable;
+      taxableTotal += taxable;
+      taxTotal += tax;
+      return (
+        "<tr>" +
+        "<td>" + escapeHtmlForInvoice(it.name) + "</td>" +
+        "<td>" + INVOICE_HSN_CODE + "</td>" +
+        '<td style="text-align:center">' + (it.qty || 0) + "</td>" +
+        '<td style="text-align:right">Rs. ' + taxable.toFixed(2) + "</td>" +
+        '<td style="text-align:right">Rs. ' + lineTotal.toFixed(2) + "</td>" +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  const cgst = intraState ? taxTotal / 2 : 0;
+  const sgst = intraState ? taxTotal / 2 : 0;
+  const igst = intraState ? 0 : taxTotal;
+  const grandTotal = taxableTotal + taxTotal;
+  const invoiceDate = new Date().toLocaleDateString("en-IN");
+  const gstinLine = SELLER_GSTIN
+    ? "GSTIN: " + escapeHtmlForInvoice(SELLER_GSTIN)
+    : "GSTIN: Not registered / not set";
+
+  const taxRowsHtml = intraState
+    ? "<tr><td>CGST (" + (rate / 2).toFixed(1) + "%)</td><td style=\"text-align:right\">Rs. " + cgst.toFixed(2) + "</td></tr>" +
+      "<tr><td>SGST (" + (rate / 2).toFixed(1) + "%)</td><td style=\"text-align:right\">Rs. " + sgst.toFixed(2) + "</td></tr>"
+    : "<tr><td>IGST (" + rate + "%)</td><td style=\"text-align:right\">Rs. " + igst.toFixed(2) + "</td></tr>";
+
+  return (
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><style>" +
+    "body { font-family: Arial, sans-serif; font-size: 12px; color: #222; padding: 24px; }" +
+    "h1 { font-size: 20px; margin: 0 0 4px; }" +
+    ".muted { color: #666; }" +
+    "table.items { width: 100%; border-collapse: collapse; margin-top: 16px; }" +
+    "table.items th, table.items td { border: 1px solid #ccc; padding: 6px 8px; font-size: 11px; }" +
+    "table.items th { background: #f4f4f4; text-align: left; }" +
+    "table.meta { width: 100%; margin-top: 14px; }" +
+    "table.meta td { vertical-align: top; padding: 0; font-size: 11px; }" +
+    "table.totals { width: 280px; margin-left: auto; margin-top: 10px; }" +
+    "table.totals td { border: none; padding: 3px 8px; font-size: 12px; }" +
+    "</style></head><body>" +
+    "<h1>Tax Invoice</h1>" +
+    "<p class='muted'>" + escapeHtmlForInvoice(SELLER_LEGAL_NAME) + " &mdash; " + escapeHtmlForInvoice(SELLER_ADDRESS) + "<br/>" + gstinLine + "</p>" +
+    "<table class='meta'><tr>" +
+    "<td style='width:50%'>" +
+    "<strong>Invoice No:</strong> " + invoiceNumber + "<br/>" +
+    "<strong>Invoice Date:</strong> " + invoiceDate + "<br/>" +
+    "<strong>Order ID:</strong> " + escapeHtmlForInvoice(order.orderId) +
+    "</td>" +
+    "<td style='width:50%'>" +
+    "<strong>Billed To:</strong><br/>" +
+    escapeHtmlForInvoice(order.customerName) + "<br/>" +
+    escapeHtmlForInvoice(order.address) + ", " + escapeHtmlForInvoice(order.city) + " - " + escapeHtmlForInvoice(order.pincode) + "<br/>" +
+    escapeHtmlForInvoice(order.phone) +
+    "</td>" +
+    "</tr></table>" +
+    "<table class='items'><thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Taxable Value</th><th>Amount (incl. GST)</th></tr></thead>" +
+    "<tbody>" + itemRows + "</tbody></table>" +
+    "<table class='totals'>" +
+    "<tr><td>Taxable Value</td><td style='text-align:right'>Rs. " + taxableTotal.toFixed(2) + "</td></tr>" +
+    taxRowsHtml +
+    "<tr><td><strong>Total</strong></td><td style='text-align:right'><strong>Rs. " + grandTotal.toFixed(2) + "</strong></td></tr>" +
+    "</table>" +
+    "<p class='muted' style='margin-top:24px; font-size:10px;'>This is a system-generated invoice and does not require a signature. Seller state: " + escapeHtmlForInvoice(SELLER_STATE_NAME) + ".</p>" +
+    "</body></html>"
+  );
+}
+
+// Returns { blob, invoiceNumber }. Throws on failure — callers should
+// wrap this in try/catch so a PDF-generation hiccup never blocks the
+// delivery email itself from sending.
+function generateGstInvoicePdf(order) {
+  const invoiceNumber = getNextInvoiceNumber();
+  const html = buildGstInvoiceHtml(order, invoiceNumber);
+  const htmlBlob = Utilities.newBlob(html, "text/html", "invoice.html");
+  const pdfBlob = htmlBlob.getAs("application/pdf");
+  pdfBlob.setName("Invoice-" + order.orderId + ".pdf");
+  return { blob: pdfBlob, invoiceNumber: invoiceNumber };
 }
 
 // Visit your deployment URL directly in a browser (a plain GET request)
@@ -301,6 +536,22 @@ function doPost(e) {
         return jsonResponse(handleListCallbackRequests());
       case "updateCallbackStatus":
         return jsonResponse(handleUpdateCallbackStatus(payload));
+      case "saveAddress":
+        return jsonResponse(handleSaveAddress(payload));
+      case "getMyAddresses":
+        return jsonResponse(handleGetMyAddresses(payload));
+      case "deleteAddress":
+        return jsonResponse(handleDeleteAddress(payload));
+      case "setDefaultAddress":
+        return jsonResponse(handleSetDefaultAddress(payload));
+      case "getActiveCampaign":
+        return jsonResponse(handleGetActiveCampaign());
+      case "listCampaigns":
+        return jsonResponse(handleListCampaigns());
+      case "upsertCampaign":
+        return jsonResponse(handleUpsertCampaign(payload));
+      case "deleteCampaign":
+        return jsonResponse(handleDeleteCampaign(payload));
       default:
         return jsonResponse({ ok: false, message: "Unknown action" });
     }
@@ -348,6 +599,9 @@ function sendOrderConfirmationEmail(order) {
 }
 
 // Sent every time an admin moves an order to a new shipment stage.
+// Sent every time an admin moves an order to a new shipment stage. When
+// the new stage is "Delivered", a GST invoice PDF is generated and
+// attached automatically.
 function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
   try {
     if (!order || !order.email) return { ok: false, error: "No email on order." };
@@ -364,14 +618,33 @@ function sendOrderStatusEmail(order, status, note, carrier, trackingNumber) {
     ];
     if (carrier) lines.push(`Courier: ${carrier}`);
     if (trackingNumber) lines.push(`Tracking number: ${trackingNumber}`);
+
+    const mailOptions = { name: "neobonn" };
+    let invoiceNumber = null;
+
+    if (status === "Delivered") {
+      try {
+        const invoice = generateGstInvoicePdf(order);
+        mailOptions.attachments = [invoice.blob];
+        invoiceNumber = invoice.invoiceNumber;
+        lines.push("", `Your GST invoice (${invoiceNumber}) is attached to this email as a PDF.`);
+      } catch (invoiceErr) {
+        // Never let invoice generation break the delivery email — log it
+        // (visible via Apps Script "Executions" tab) and send the plain
+        // delivery confirmation instead. The order is still marked
+        // Delivered either way; nothing about the order update fails.
+        console.error("GST invoice generation failed for " + order.orderId + ": " + invoiceErr.message);
+      }
+    }
+
     lines.push(
       "",
       `Track your order anytime at: https://www.neobonn.com/track-order?orderId=${encodeURIComponent(order.orderId)}&email=${encodeURIComponent(order.email)}`,
       "",
       `— Team neobonn`
     );
-    MailApp.sendEmail(order.email, subject, lines.join("\n"), { name: "neobonn" });
-    return { ok: true };
+    MailApp.sendEmail(order.email, subject, lines.join("\n"), mailOptions);
+    return { ok: true, invoiceNumber };
   } catch (err) {
     console.error("sendOrderStatusEmail failed: " + err.message);
     return { ok: false, error: err.message };
@@ -554,7 +827,33 @@ function handleEnquiry({ name, email, phone, message }) {
 
 // ---------------- Orders ----------------
 
-function handlePlaceOrder({ items, customer, amount }) {
+// Recomputes the order total from the *server's* Products sheet prices —
+// never trusts the amount the browser sends, since that request can be
+// edited (devtools, replayed/modified network calls) before it reaches
+// us. This is the one source of truth for what Razorpay actually charges
+// and what gets saved as the order's amount. Also applies whatever
+// discount the currently-Active campaign says (see getActiveDiscountPercent)
+// — again, from the sheet, never from the browser.
+function computeAuthoritativeAmount(items) {
+  const sheet = getSheet("Products");
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getProductColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const priceCol = colMap["Price"];
+  let total = 0;
+  for (const item of items) {
+    const row = rows.find((r) => String(r[idCol]) === String(item.id));
+    // Unknown product id shouldn't be billable at whatever price the
+    // client claims — treat it as zero rather than trusting item.price.
+    const price = row ? Number(row[priceCol]) || 0 : 0;
+    total += price * Number(item.qty || 0);
+  }
+  const discountPercent = getActiveDiscountPercent();
+  if (discountPercent > 0) total = total * (1 - discountPercent / 100);
+  return Math.round(total * 100) / 100; // avoid floating-point cent dust
+}
+
+function handlePlaceOrder({ items, customer }) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -563,6 +862,13 @@ function handlePlaceOrder({ items, customer, amount }) {
     // sold out or doesn't have enough units left, so we never oversell.
     const stockError = checkStockAvailability(items);
     if (stockError) return { ok: false, message: stockError };
+
+    // ---- Price check: always charge what the Products sheet actually
+    // says, never whatever amount the browser happened to send.
+    const amount = computeAuthoritativeAmount(items);
+    if (amount <= 0) {
+      return { ok: false, message: "Could not calculate order total. Please refresh and try again." };
+    }
 
     const orderId = "ORD" + new Date().getTime();
 
@@ -758,10 +1064,10 @@ function rowToOrderObject(r) {
     items: safeParse(r[1], []),
     customerName: r[2],
     email: r[3],
-    phone: r[4],
+    phone: String(r[4] ?? ""), // Sheets can return a numeric-looking cell as a JS number, not a string
     address: r[5],
     city: r[6],
-    pincode: r[7],
+    pincode: String(r[7] ?? ""),
     amount: r[8],
     status: r[9], // payment status: Pending | Paid
     createdAt: r[12],
@@ -912,6 +1218,7 @@ function handleUpdateOrderStatus({ orderId, status, note, carrier, trackingNumbe
     order: updatedOrder,
     emailSent: !!emailResult.ok && !emailResult.skipped,
     emailError: emailResult.ok ? null : emailResult.error,
+    invoiceNumber: emailResult.invoiceNumber || null,
   };
 }
 
@@ -1009,6 +1316,166 @@ function handleUpdateStock({ id, stock }) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------------- Campaigns (Admin -> Banners & Offers) ----------------
+// Header-based column lookup, same pattern as Products (see
+// getProductColumnMap above) — safe against reordered/extra columns.
+const CAMPAIGN_COLUMNS = [
+  "Id", "Name", "Active", "DiscountPercent", "HeroImage",
+  "HeroTitle", "HeroSubtitle", "StripText", "CtaLink", "CreatedAt", "UpdatedAt",
+];
+
+function getCampaignColumnMap(sheet) {
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const wanted = {};
+  CAMPAIGN_COLUMNS.forEach((col) => { wanted[normalizeHeaderText(col)] = col; });
+  const map = {};
+  header.forEach((h, i) => {
+    const norm = normalizeHeaderText(h);
+    if (norm && wanted[norm] && !(wanted[norm] in map)) map[wanted[norm]] = i;
+  });
+  CAMPAIGN_COLUMNS.forEach((col, i) => { if (!(col in map)) map[col] = i; });
+  return map;
+}
+
+function rowToCampaignObject(row, colMap) {
+  const val = (col) => row[colMap[col]];
+  return {
+    id: String(val("Id") || ""),
+    name: val("Name") || "",
+    active: val("Active") === true || val("Active") === "TRUE",
+    discountPercent: Math.max(0, Math.min(90, Number(val("DiscountPercent")) || 0)),
+    heroImage: val("HeroImage") || "",
+    heroTitle: val("HeroTitle") || "",
+    heroSubtitle: val("HeroSubtitle") || "",
+    stripText: val("StripText") || "",
+    ctaLink: val("CtaLink") || "/products",
+    createdAt: val("CreatedAt") || "",
+    updatedAt: val("UpdatedAt") || "",
+  };
+}
+
+function campaignToRowArray(c, colMap, existingRow) {
+  const row = existingRow ? existingRow.slice() : new Array(CAMPAIGN_COLUMNS.length).fill("");
+  const set = (col, value) => { if (col in colMap) row[colMap[col]] = value; };
+  set("Id", c.id);
+  set("Name", c.name);
+  set("Active", !!c.active);
+  set("DiscountPercent", Math.max(0, Math.min(90, Number(c.discountPercent) || 0)));
+  set("HeroImage", c.heroImage || "");
+  set("HeroTitle", c.heroTitle || "");
+  set("HeroSubtitle", c.heroSubtitle || "");
+  set("StripText", c.stripText || "");
+  set("CtaLink", c.ctaLink || "/products");
+  if (!existingRow) set("CreatedAt", new Date());
+  set("UpdatedAt", new Date());
+  return row;
+}
+
+// Public (no login needed) — read by every storefront page to decide
+// whether to show a hero banner / promo strip / discounted prices.
+// Never throws: if the Campaigns tab doesn't exist yet (or isn't set
+// up), the site should just behave as if no campaign is live, not break.
+function handleGetActiveCampaign() {
+  try {
+    const sheet = getSheet("Campaigns");
+    if (!sheet) return { ok: true, campaign: null };
+    const rows = sheet.getDataRange().getValues();
+    const colMap = getCampaignColumnMap(sheet);
+    const activeCol = colMap["Active"];
+    const active = rows.slice(1).find((r) => r[activeCol] === true || r[activeCol] === "TRUE");
+    return { ok: true, campaign: active ? rowToCampaignObject(active, colMap) : null };
+  } catch (err) {
+    return { ok: true, campaign: null };
+  }
+}
+
+// admin: every campaign (active or not), so the admin panel can list
+// past/draft occasions and let you flip which one is live.
+function handleListCampaigns() {
+  const sheet = getSheet("Campaigns");
+  if (!sheet) {
+    return {
+      ok: false,
+      message:
+        'The "Campaigns" sheet tab doesn\'t exist yet. Add it — see the ' +
+        "setup comment at the top of Code.gs for the exact header row.",
+    };
+  }
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getCampaignColumnMap(sheet);
+  const campaigns = rows
+    .slice(1)
+    .filter((r) => r.some((cell) => cell !== ""))
+    .map((r) => rowToCampaignObject(r, colMap))
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  return { ok: true, campaigns };
+}
+
+// admin: create or update one campaign. Marking a campaign Active
+// automatically deactivates every other campaign in the same call —
+// only one can ever be "live" at once, so the storefront never has to
+// guess which banner/discount to show.
+function handleUpsertCampaign(c) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Campaigns");
+    if (!sheet) return { ok: false, message: 'The "Campaigns" sheet tab doesn\'t exist yet.' };
+    const rows = sheet.getDataRange().getValues();
+    const colMap = getCampaignColumnMap(sheet);
+    const idCol = colMap["Id"];
+    const activeCol = colMap["Active"];
+
+    const id = c.id && String(c.id).trim() ? String(c.id).trim() : "CAMP" + new Date().getTime();
+    const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === id);
+    const rowData = campaignToRowArray(
+      { ...c, id },
+      colMap,
+      rowIndex > -1 ? rows[rowIndex] : null
+    );
+
+    if (rowIndex === -1) {
+      sheet.appendRow(rowData);
+    } else {
+      sheet.getRange(rowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
+    }
+
+    // If this campaign is now Active, switch every other row off.
+    if (c.active) {
+      const freshRows = sheet.getDataRange().getValues();
+      for (let i = 1; i < freshRows.length; i++) {
+        if (String(freshRows[i][idCol]) !== id && (freshRows[i][activeCol] === true || freshRows[i][activeCol] === "TRUE")) {
+          sheet.getRange(i + 1, activeCol + 1).setValue(false);
+        }
+      }
+    }
+
+    return handleListCampaigns();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleDeleteCampaign({ id }) {
+  const sheet = getSheet("Campaigns");
+  if (!sheet) return { ok: false, message: 'The "Campaigns" sheet tab doesn\'t exist yet.' };
+  const rows = sheet.getDataRange().getValues();
+  const colMap = getCampaignColumnMap(sheet);
+  const idCol = colMap["Id"];
+  const rowIndex = rows.findIndex((r, i) => i > 0 && String(r[idCol]) === String(id));
+  if (rowIndex > -1) sheet.deleteRow(rowIndex + 1);
+  return handleListCampaigns();
+}
+
+// The single source of truth for "what discount is live right now" —
+// used by computeAuthoritativeAmount so checkout always charges
+// whatever the active campaign says, regardless of what the browser
+// sends. Never throws (same reasoning as handleGetActiveCampaign).
+function getActiveDiscountPercent() {
+  const res = handleGetActiveCampaign();
+  return res.campaign ? res.campaign.discountPercent : 0;
 }
 
 function safeParse(str, fallback) {
@@ -1422,7 +1889,7 @@ function rowToCallbackObject(r) {
     requestId: r[0],
     name: r[1],
     email: r[2],
-    phone: r[3],
+    phone: String(r[3] ?? ""),
     orderId: r[4],
     queryType: r[5],
     message: r[6],
@@ -1529,6 +1996,225 @@ function handleUpdateCallbackStatus({ requestId, status, adminNote }) {
 
     const updated = rowToCallbackObject(sheet.getRange(rowIndex + 1, 1, 1, 12).getValues()[0]);
     return { ok: true, request: updated };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------- Saved Addresses (multi-address delivery book) ----------------
+// One signed-in customer (matched by Email) can save several delivery
+// addresses and pick one at checkout instead of retyping it every
+// time. Lat/Lng come from the browser's geolocation + free reverse-
+// geocoding on the frontend (see src/lib/geolocation.js) when the
+// customer taps "Use my current location" — they're just a reference
+// point stored alongside the typed-out address, nothing more.
+
+const ADDRESS_COLUMNS = [
+  "AddressId", "Email", "Label", "Name", "Phone", "Line1", "Line2",
+  "City", "State", "Pincode", "Lat", "Lng", "IsDefault", "CreatedAt", "UpdatedAt",
+];
+
+function rowToAddressObject(r) {
+  return {
+    addressId: r[0],
+    email: r[1],
+    label: r[2],
+    name: r[3],
+    phone: String(r[4] ?? ""),
+    line1: r[5],
+    line2: r[6],
+    city: r[7],
+    state: r[8],
+    pincode: String(r[9] ?? ""),
+    lat: r[10] === "" ? null : Number(r[10]),
+    lng: r[11] === "" ? null : Number(r[11]),
+    isDefault: r[12] === true || r[12] === "TRUE",
+    createdAt: r[13],
+    updatedAt: r[14],
+  };
+}
+
+function addressToRowArray(a) {
+  return [
+    a.addressId,
+    a.email,
+    a.label || "Home",
+    a.name || "",
+    a.phone || "",
+    a.line1 || "",
+    a.line2 || "",
+    a.city || "",
+    a.state || "",
+    a.pincode || "",
+    a.lat === null || a.lat === undefined ? "" : a.lat,
+    a.lng === null || a.lng === undefined ? "" : a.lng,
+    !!a.isDefault,
+    a.createdAt,
+    a.updatedAt,
+  ];
+}
+
+// Creates a new saved address, or updates an existing one (when
+// payload.addressId is given and belongs to that email). If the
+// address is marked default — or it's the customer's very first saved
+// address — every other address for that same email is un-defaulted
+// so exactly one row stays the default at any time.
+function handleSaveAddress(payload) {
+  const { addressId, email, label, name, phone, line1, city, pincode } = payload || {};
+  if (!email) return { ok: false, message: "Please sign in to save an address." };
+  if (!name || !phone || !line1 || !city || !pincode) {
+    return { ok: false, message: "Name, phone, address line, city and pincode are required." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    const emailRows = rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r, i }) => i > 0 && String(r[1]).toLowerCase() === String(email).toLowerCase());
+
+    const isFirstAddress = emailRows.length === 0;
+    const wantsDefault = !!payload.isDefault || isFirstAddress;
+    const now = new Date();
+
+    let targetRowIndex = -1;
+    if (addressId) {
+      targetRowIndex = emailRows.findIndex(({ r }) => String(r[0]) === String(addressId));
+    }
+
+    // Un-default every other address for this customer first, if this
+    // one is becoming the default.
+    if (wantsDefault) {
+      emailRows.forEach(({ i }) => {
+        if (rows[i][0] !== addressId) sheet.getRange(i + 1, 13).setValue(false); // IsDefault column
+      });
+    }
+
+    if (addressId && targetRowIndex !== -1) {
+      // Update in place — keep original AddressId/CreatedAt.
+      const existing = rows[emailRows[targetRowIndex].i];
+      const updated = {
+        addressId: existing[0],
+        email,
+        label: label || existing[2],
+        name,
+        phone,
+        line1,
+        line2: payload.line2 !== undefined ? payload.line2 : existing[6],
+        city,
+        state: payload.state !== undefined ? payload.state : existing[8],
+        pincode,
+        lat: payload.lat !== undefined ? payload.lat : existing[10],
+        lng: payload.lng !== undefined ? payload.lng : existing[11],
+        isDefault: wantsDefault,
+        createdAt: existing[13],
+        updatedAt: now,
+      };
+      sheet.getRange(emailRows[targetRowIndex].i + 1, 1, 1, ADDRESS_COLUMNS.length).setValues([addressToRowArray(updated)]);
+      return { ok: true, address: rowToAddressObject(addressToRowArray(updated)) };
+    }
+
+    // Otherwise, create a brand-new saved address.
+    const newAddress = {
+      addressId: "ADDR" + now.getTime(),
+      email,
+      label: label || "Home",
+      name,
+      phone,
+      line1,
+      line2: payload.line2 || "",
+      city,
+      state: payload.state || "",
+      pincode,
+      lat: payload.lat ?? "",
+      lng: payload.lng ?? "",
+      isDefault: wantsDefault,
+      createdAt: now,
+      updatedAt: now,
+    };
+    sheet.appendRow(addressToRowArray(newAddress));
+    return { ok: true, address: rowToAddressObject(addressToRowArray(newAddress)) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Every saved address for one customer, most-recently-updated first,
+// with the default address (if any) pinned to the top.
+function handleGetMyAddresses({ email }) {
+  if (!email) return { ok: false, message: "Email is required." };
+  const rows = getSheet("Addresses").getDataRange().getValues();
+  const addresses = rows
+    .slice(1)
+    .filter((r) => r[0] && String(r[1]).toLowerCase() === String(email).toLowerCase())
+    .map(rowToAddressObject)
+    .sort((a, b) => {
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+  return { ok: true, addresses };
+}
+
+// Deletes one saved address. Requires the owning email as a basic
+// ownership check (this is a public web app endpoint, so we don't
+// trust addressId alone). If the deleted address was the default and
+// other addresses remain, the most recently updated one is promoted
+// to default so checkout always has a sensible pre-selection.
+function handleDeleteAddress({ addressId, email }) {
+  if (!addressId || !email) return { ok: false, message: "addressId and email are required." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    const rowIndex = rows.findIndex(
+      (r, i) => i > 0 && String(r[0]) === String(addressId) && String(r[1]).toLowerCase() === String(email).toLowerCase()
+    );
+    if (rowIndex === -1) return { ok: false, message: "Address not found." };
+
+    const wasDefault = rows[rowIndex][12] === true || rows[rowIndex][12] === "TRUE";
+    sheet.deleteRow(rowIndex + 1);
+
+    if (wasDefault) {
+      const remaining = sheet
+        .getDataRange()
+        .getValues()
+        .map((r, i) => ({ r, i }))
+        .filter(({ r, i }) => i > 0 && String(r[1]).toLowerCase() === String(email).toLowerCase())
+        .sort((a, b) => new Date(b.r[14]) - new Date(a.r[14]));
+      if (remaining.length) sheet.getRange(remaining[0].i + 1, 13).setValue(true);
+    }
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Marks one address as the default for a customer and un-defaults
+// every other address they have saved.
+function handleSetDefaultAddress({ addressId, email }) {
+  if (!addressId || !email) return { ok: false, message: "addressId and email are required." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet("Addresses");
+    const rows = sheet.getDataRange().getValues();
+    let found = false;
+    rows.forEach((r, i) => {
+      if (i === 0) return;
+      if (String(r[1]).toLowerCase() !== String(email).toLowerCase()) return;
+      const isTarget = String(r[0]) === String(addressId);
+      if (isTarget) found = true;
+      sheet.getRange(i + 1, 13).setValue(isTarget);
+      if (isTarget) sheet.getRange(i + 1, 15).setValue(new Date()); // UpdatedAt
+    });
+    if (!found) return { ok: false, message: "Address not found." };
+    return { ok: true };
   } finally {
     lock.releaseLock();
   }

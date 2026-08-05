@@ -168,10 +168,22 @@ export const SheetsAPI = {
   listCallbackRequests: () => callSheetsApi("listCallbackRequests"), // admin: every request, newest first
   updateCallbackStatus: (data) => callSheetsApi("updateCallbackStatus", data), // admin: {requestId, status, adminNote?}
 
+  // ---- Addresses sheet (saved delivery addresses, multi-address book) ----
+  saveAddress: (data) => callSheetsApi("saveAddress", data), // {addressId?, email, label, name, phone, line1, line2?, city, state?, pincode, lat?, lng?, isDefault?}
+  getMyAddresses: (email) => callSheetsApi("getMyAddresses", { email }),
+  deleteAddress: (data) => callSheetsApi("deleteAddress", data), // {addressId, email}
+  setDefaultAddress: (data) => callSheetsApi("setDefaultAddress", data), // {addressId, email}
+
   // ---- Products sheet (admin panel reads/writes here) ----
   listProducts: () => callSheetsApi("listProducts"),
   upsertProduct: (product) => callSheetsApi("upsertProduct", product),
   deleteProduct: (id) => callSheetsApi("deleteProduct", { id }),
   updateStock: (id, stock) => callSheetsApi("updateStock", { id, stock }), // inventory manager
   bulkUpsertProducts: (products) => callSheetsApi("bulkUpsertProducts", { products }), // CSV import
+
+  // ---- Campaigns (Admin -> Banners & Offers: live banner + sitewide discount) ----
+  getActiveCampaign: () => callSheetsApi("getActiveCampaign"), // public — powers hero banner, promo strip, and discounted prices everywhere
+  listCampaigns: () => callSheetsApi("listCampaigns"), // admin: every campaign, most recently updated first
+  upsertCampaign: (campaign) => callSheetsApi("upsertCampaign", campaign), // admin: {id?, name, active, discountPercent, heroImage?, heroTitle?, heroSubtitle?, stripText?, ctaLink?}
+  deleteCampaign: (id) => callSheetsApi("deleteCampaign", { id }), // admin
 };
