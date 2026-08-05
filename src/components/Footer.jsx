@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { MapPin } from "lucide-react";
 import logo from "../assets/logo-icon.png";
-import botanicalStrip from "../assets/footer-botanical.svg";
 import waveDivider from "../assets/footer-wave.svg";
 import { COMPANY } from "../data/company";
 
@@ -28,31 +27,31 @@ const LEGAL_LINKS = [
 
 export default function Footer() {
   return (
-    <footer className="relative mt-32 bg-[var(--color-forest-dark)] text-[var(--color-cream)]">
+    <footer className="relative mt-20 bg-[var(--color-forest-dark)] text-[var(--color-cream)]">
       {/* Organic wave transition from the cream page body into the dark footer */}
-      <div className="absolute -top-[59px] left-0 h-[60px] w-full overflow-hidden leading-none">
+      <div className="absolute -top-[39px] left-0 h-[40px] w-full overflow-hidden leading-none">
         <img src={waveDivider} alt="" aria-hidden="true" className="h-full w-full" />
       </div>
 
       {/* Soft ambient glow behind the logo, echoing the hero section */}
-      <div className="pointer-events-none absolute left-1/2 top-16 h-64 w-64 -translate-x-1/2 rounded-full bg-[var(--color-gold)]/10 blur-3xl" />
+      <div className="pointer-events-none absolute left-1/2 top-10 h-48 w-48 -translate-x-1/2 rounded-full bg-[var(--color-gold)]/10 blur-3xl" />
 
-      <div className="relative mx-auto max-w-[1120px] px-5 pb-12 pt-14 text-center md:px-8">
+      <div className="relative mx-auto max-w-[1120px] px-5 pb-8 pt-9 text-center md:px-8">
         {/* Logo + wordmark */}
-        <Link to="/" className="inline-flex flex-col items-center gap-2.5">
-          <img src={logo} alt="neobonn icon" width="330" height="349" className="h-16 w-auto object-contain drop-shadow-sm" />
-          <span className="font-display text-2xl tracking-wide">
+        <Link to="/" className="inline-flex flex-col items-center gap-1.5">
+          <img src={logo} alt="neobonn icon" width="330" height="349" className="h-11 w-auto object-contain drop-shadow-sm" />
+          <span className="font-display text-xl tracking-wide">
             <span className="text-[var(--color-cream)]">neo</span><span className="text-[var(--color-gold-light)]">bonn</span>
           </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[var(--color-gold-light)]">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.32em] text-[var(--color-gold-light)]">
             {COMPANY.tagline}
           </span>
         </Link>
 
-        <div className="mx-auto mt-7 h-px w-16 bg-[var(--color-cream)]/15" />
+        <div className="mx-auto mt-4 h-px w-16 bg-[var(--color-cream)]/15" />
 
         {/* Copyright + legal links */}
-        <div className="mt-7 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-sm text-[var(--color-cream)]/70">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-sm text-[var(--color-cream)]/70">
           <span>© {new Date().getFullYear()}, {COMPANY.legalName}</span>
           {LEGAL_LINKS.map((l) => (
             <span key={l.to} className="flex items-center gap-2">
@@ -63,22 +62,22 @@ export default function Footer() {
         </div>
 
         {/* Contact line */}
-        <p className="mt-3 text-sm text-[var(--color-cream)]/70">
+        <p className="mt-2 text-sm text-[var(--color-cream)]/70">
           {COMPANY.phones[0]} &nbsp;·&nbsp; {COMPANY.email}
         </p>
-        <p className="mx-auto mt-1.5 flex max-w-sm items-start justify-center gap-1.5 text-xs text-[var(--color-cream)]/45">
+        <p className="mx-auto mt-1 flex max-w-sm items-start justify-center gap-1.5 text-xs text-[var(--color-cream)]/45">
           <MapPin size={13} className="mt-0.5 shrink-0" />
           <span className="min-w-0 text-left">{COMPANY.address}</span>
         </p>
 
         {/* Social icons */}
-        <div className="mt-7 flex items-center justify-center gap-4">
+        <div className="mt-4 flex items-center justify-center gap-4">
           <a
             href={COMPANY.social.instagram}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Instagram"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-cream)]/20 text-[var(--color-cream)]/80 transition-all hover:-translate-y-0.5 hover:border-[var(--color-gold-light)] hover:text-[var(--color-gold-light)]"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-cream)]/20 text-[var(--color-cream)]/80 transition-all hover:-translate-y-0.5 hover:border-[var(--color-gold-light)] hover:text-[var(--color-gold-light)]"
           >
             <InstagramIcon className="h-4 w-4" />
           </a>
@@ -87,21 +86,11 @@ export default function Footer() {
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Facebook"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-cream)]/20 text-[var(--color-cream)]/80 transition-all hover:-translate-y-0.5 hover:border-[var(--color-gold-light)] hover:text-[var(--color-gold-light)]"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-cream)]/20 text-[var(--color-cream)]/80 transition-all hover:-translate-y-0.5 hover:border-[var(--color-gold-light)] hover:text-[var(--color-gold-light)]"
           >
             <FacebookIcon className="h-4 w-4" />
           </a>
         </div>
-      </div>
-
-      {/* Decorative two-layer botanical line-art strip */}
-      <div className="relative h-[120px] w-full overflow-hidden sm:h-[150px]">
-        <img
-          src={botanicalStrip}
-          alt=""
-          aria-hidden="true"
-          className="h-full w-full object-cover object-bottom"
-        />
       </div>
     </footer>
   );
