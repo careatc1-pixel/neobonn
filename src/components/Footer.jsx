@@ -36,6 +36,61 @@ export default function Footer() {
       {/* Soft ambient glow behind the logo, echoing the hero section */}
       <div className="pointer-events-none absolute left-1/2 top-10 h-48 w-48 -translate-x-1/2 rounded-full bg-[var(--color-gold)]/10 blur-3xl" />
 
+      {/* Botanical leaf flourish — same quiet, gilded-leaf motif used on
+          the homepage sale banner, scattered softly across the footer */}
+      <svg
+        className="pointer-events-none absolute inset-0 h-full w-full"
+        viewBox="0 0 1000 300"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="footerLeafGold" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--color-gold-light)" stopOpacity="0.45" />
+            <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0.18" />
+          </linearGradient>
+          <linearGradient id="footerLeafCream" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--color-cream)" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="var(--color-cream)" stopOpacity="0.05" />
+          </linearGradient>
+          <path id="footerLeaf" d="M0,0 C9,-16 27,-16 36,0 C27,16 9,16 0,0 Z" />
+          <g id="footerLeafVein">
+            <use href="#footerLeaf" />
+            <path d="M2,0 L34,0" stroke="var(--color-forest-dark)" strokeOpacity="0.2" strokeWidth="1" fill="none" />
+          </g>
+        </defs>
+
+        {/* top-left sprig */}
+        <g>
+          <path d="M 0,10 C 55,34 96,78 132,138" stroke="var(--color-cream)" strokeOpacity="0.16" fill="none" strokeWidth="1.4" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(28,26) rotate(58)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafCream)" transform="translate(62,54) rotate(70) scale(0.8)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(94,92) rotate(52) scale(0.6)" />
+        </g>
+
+        {/* top-right sprig */}
+        <g>
+          <path d="M 1000,6 C 946,30 906,72 868,128" stroke="var(--color-cream)" strokeOpacity="0.16" fill="none" strokeWidth="1.4" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(958,18) rotate(112)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafCream)" transform="translate(926,48) rotate(98) scale(0.8)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(896,84) rotate(120) scale(0.6)" />
+        </g>
+
+        {/* bottom-left sprig */}
+        <g>
+          <path d="M 0,300 C 46,278 78,244 108,204" stroke="var(--color-cream)" strokeOpacity="0.14" fill="none" strokeWidth="1.2" />
+          <use href="#footerLeafVein" fill="url(#footerLeafCream)" transform="translate(30,276) rotate(-66) scale(0.55)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(58,250) rotate(-82) scale(0.42)" />
+        </g>
+
+        {/* bottom-right sprig */}
+        <g>
+          <path d="M 1000,296 C 954,272 920,238 888,198" stroke="var(--color-cream)" strokeOpacity="0.14" fill="none" strokeWidth="1.2" />
+          <use href="#footerLeafVein" fill="url(#footerLeafGold)" transform="translate(972,274) rotate(-118) scale(0.55)" />
+          <use href="#footerLeafVein" fill="url(#footerLeafCream)" transform="translate(944,248) rotate(-100) scale(0.42)" />
+        </g>
+      </svg>
+
       <div className="relative mx-auto max-w-[1120px] px-5 pb-8 pt-9 text-center md:px-8">
         {/* Logo + wordmark */}
         <Link to="/" className="inline-flex flex-col items-center gap-1.5">
