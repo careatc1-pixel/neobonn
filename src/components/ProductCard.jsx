@@ -23,8 +23,6 @@ export default function ProductCard({ product }) {
         <img
           src={product.image}
           alt={product.name}
-          loading="lazy"
-          decoding="async"
           onError={(e) => (e.currentTarget.style.opacity = 0)}
           className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
             outOfStock ? "grayscale" : ""

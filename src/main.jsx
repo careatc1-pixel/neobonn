@@ -12,17 +12,6 @@ import { CampaignProvider } from "./context/CampaignContext.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import GlobalErrorOverlay from "./components/GlobalErrorOverlay.jsx";
 
-// By default the browser tries to restore the exact scroll position a
-// page was at before a refresh or back/forward navigation. In a
-// single-page app that fights with our own ScrollToTop reset (App.jsx)
-// and is what causes "refresh karne ke baad user beech mein hi rehta
-// hai" — the browser puts the scroll back where it was, then our code
-// never gets a chance to move it because this runs before React mounts.
-// Turning it off makes every load/refresh start at the top, consistently.
-if ("scrollRestoration" in window.history) {
-  window.history.scrollRestoration = "manual";
-}
-
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     {/* Catches uncaught runtime errors + unhandled promise rejections

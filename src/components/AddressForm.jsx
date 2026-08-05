@@ -26,7 +26,6 @@ export default function AddressForm({ initialAddress, onSave, onCancel, showDefa
   const [form, setForm] = useState(() => ({ ...emptyForm, ...initialAddress }));
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState("");
-  const [locateNotice, setLocateNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,28 +33,17 @@ export default function AddressForm({ initialAddress, onSave, onCancel, showDefa
 
   const handleUseLocation = async () => {
     setLocateError("");
-    setLocateNotice("");
     setLocating(true);
     try {
       const detected = await detectCurrentAddress();
       set({
-        // GPS + reverse geocoding can find the street/area reliably, but
-        // it cannot read a house or flat number off a door — that part
-        // has to come from the customer. So we never overwrite whatever
-        // house/flat number they've already typed, and prefix the
-        // detected street instead of replacing the field outright.
-        line1: form.line1 ? form.line1 : detected.line1 || "",
+        line1: detected.line1 || form.line1,
         city: detected.city || form.city,
         state: detected.state || form.state,
         pincode: detected.pincode || form.pincode,
         lat: detected.lat,
         lng: detected.lng,
       });
-      setLocateNotice(
-        detected.accuracy && detected.accuracy > 50
-          ? "Location found, but GPS accuracy was low. Please double-check the house/flat no., street and pincode below before saving."
-          : "Location found. Please add or confirm your house/flat number below — GPS can't read that off a door."
-      );
     } catch (err) {
       setLocateError(err.message || "Couldn't get your current location.");
     } finally {
@@ -93,7 +81,6 @@ export default function AddressForm({ initialAddress, onSave, onCancel, showDefa
         {locating ? "Finding your location..." : "Use my current location"}
       </button>
       {locateError && <p className="text-xs text-red-600">{locateError}</p>}
-      {locateNotice && <p className="text-xs text-amber-600">{locateNotice}</p>}
 
       <div className="flex gap-2">
         {LABELS.map((l) => (

@@ -16,14 +16,12 @@
 
 html {
   scroll-behavior: smooth;
-  overflow-x: hidden;
 }
 
 body {
   background-color: var(--color-cream);
   color: var(--color-charcoal);
   font-family: var(--font-body);
-  overflow-x: hidden;
 }
 
 .font-display {

@@ -167,7 +167,7 @@ export default function AdminDashboard() {
       if (res.demo) {
         setOrdersDemoMode(true);
       } else if (res.ok) {
-        setOrders(res.orders || []);
+        setOrders(res.orders);
       } else {
         setOrdersError(res.message || "Couldn't load orders.");
       }
