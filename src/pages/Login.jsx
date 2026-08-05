@@ -26,7 +26,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       const res = await login(form.email, form.password);
-      if (res.ok) navigate("/account");
+      if (res.ok) navigate("/");
       else setError(res.message || "Invalid email or password.");
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -65,7 +65,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       const res = await loginWithOtp(form.email, otp);
-      if (res.ok) navigate("/account");
+      if (res.ok) navigate("/");
       else setError(res.message || "Invalid or expired code.");
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -78,7 +78,7 @@ export default function Login() {
     setGoogleError("");
     try {
       const res = await loginWithGoogle(response.credential);
-      if (res.ok) navigate("/account");
+      if (res.ok) navigate("/");
       else setGoogleError(res.message || "Google sign-in failed. Please try again.");
     } catch (err) {
       setGoogleError(err.message || "Something went wrong. Please try again.");
