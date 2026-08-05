@@ -52,16 +52,4 @@ export function WishlistProvider({ children }) {
   );
 }
 
-export const useWishlist = () => {
-  const ctx = useContext(WishlistContext);
-  if (!ctx) {
-    // Guards against a crash (destructuring `items` off null) if this is
-    // ever rendered outside <WishlistProvider> — e.g. a stale cached build
-    // where a page component was updated to use wishlist data before the
-    // provider wrapping was deployed. Degrades to an empty wishlist
-    // instead of white-screening the whole page.
-    console.error("useWishlist() called outside <WishlistProvider> — wishlist data unavailable.");
-    return { items: [], isWishlisted: () => false, toggleWishlist: () => {}, removeItem: () => {}, count: 0 };
-  }
-  return ctx;
-};
+export const useWishlist = () => useContext(WishlistContext);

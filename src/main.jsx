@@ -6,7 +6,9 @@ import App from "./App.jsx";
 import { CartProvider } from "./context/CartContext.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { ProductsProvider } from "./context/ProductsContext.jsx";
+import { WishlistProvider } from "./context/WishlistContext.jsx";
 import { AddressProvider } from "./context/AddressContext.jsx";
+import { CampaignProvider } from "./context/CampaignContext.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import GlobalErrorOverlay from "./components/GlobalErrorOverlay.jsx";
 
@@ -22,11 +24,15 @@ createRoot(document.getElementById("root")).render(
       <BrowserRouter>
         <AuthProvider>
           <ProductsProvider>
-            <AddressProvider>
+            <CampaignProvider>
               <CartProvider>
-                <App />
+                <WishlistProvider>
+                  <AddressProvider>
+                    <App />
+                  </AddressProvider>
+                </WishlistProvider>
               </CartProvider>
-            </AddressProvider>
+            </CampaignProvider>
           </ProductsProvider>
         </AuthProvider>
       </BrowserRouter>

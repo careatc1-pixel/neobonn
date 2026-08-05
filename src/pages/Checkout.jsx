@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, Navigate } from "react-router-dom";
+import { LocateFixed, Loader2, Plus } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useAddresses } from "../context/AddressContext";
+import { useCampaign } from "../context/CampaignContext";
+import { discountedPrice } from "../lib/pricing";
 import { SheetsAPI } from "../lib/sheets";
+import { detectCurrentAddress } from "../lib/geolocation";
 import SEO from "../components/SEO";
 import AddressCard from "../components/AddressCard";
-import AddressForm from "../components/AddressForm";
 
 // Loads the Razorpay Checkout script once.
 function loadRazorpayScript() {
@@ -24,94 +26,114 @@ function loadRazorpayScript() {
 export default function Checkout() {
   const { items, subtotal, clearCart } = useCart();
   const { user } = useAuth();
-  const { addresses, loading: addressesLoading, defaultAddress, saveAddress } = useAddresses();
+  const { addresses, defaultAddress, saveAddress } = useAddresses();
+  const { discountPercent } = useCampaign();
   const navigate = useNavigate();
+  const total = discountedPrice(subtotal, discountPercent); // display only — the backend recalculates the real charge from its own Products + Campaigns sheets
 
-  // Which saved address (if any) the signed-in customer has picked.
-  const [selectedAddressId, setSelectedAddressId] = useState(null);
-  const [showAddressForm, setShowAddressForm] = useState(false);
+  // Which saved address (if any) is currently chosen for delivery.
+  const [selectedAddressId, setSelectedAddressId] = useState(defaultAddress?.addressId || null);
+  // Shows the "add a new address" form instead of the saved-address list.
+  const [addingNew, setAddingNew] = useState(addresses.length === 0);
+  const [saveNewAddress, setSaveNewAddress] = useState(true);
 
-  // Guest checkout fallback — used when nobody is signed in, so there's
-  // no address book to pick from.
-  const [guestAddress, setGuestAddress] = useState({
+  // Manual entry fields — used directly for guests, or for the "add
+  // new address" form when a signed-in customer isn't picking a saved one.
+  const [address, setAddress] = useState({
     name: user?.name || "",
     email: user?.email || "",
     phone: "",
     line1: "",
     city: "",
+    state: "",
     pincode: "",
+    lat: null,
+    lng: null,
   });
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState("");
 
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState("");
 
-  // Once the saved addresses load, pre-select the customer's default one.
-  useEffect(() => {
-    if (!selectedAddressId && defaultAddress) {
-      setSelectedAddressId(defaultAddress.addressId);
-    }
-  }, [defaultAddress, selectedAddressId]);
-
-  // A signed-in customer with no saved addresses yet should land
-  // straight on the "add new address" form instead of an empty list.
-  useEffect(() => {
-    if (user && !addressesLoading && addresses.length === 0) {
-      setShowAddressForm(true);
-    }
-  }, [user, addressesLoading, addresses.length]);
-
   if (items.length === 0) return <Navigate to="/products" replace />;
 
-  const selectedAddress = addresses.find((a) => a.addressId === selectedAddressId) || null;
+  const selectedSavedAddress = addresses.find((a) => a.addressId === selectedAddressId) || null;
 
-  const handleSaveNewAddress = async (form) => {
-    const res = await saveAddress(form);
-    if (res.ok) {
-      setShowAddressForm(false);
-      setSelectedAddressId(res.address?.addressId || res.addressId || null);
+  // The address actually used to place the order — either the picked
+  // saved address, or whatever's in the manual form right now.
+  const activeAddress =
+    !addingNew && selectedSavedAddress
+      ? {
+          name: selectedSavedAddress.name,
+          email: user?.email || address.email,
+          phone: selectedSavedAddress.phone,
+          line1: [selectedSavedAddress.line1, selectedSavedAddress.line2].filter(Boolean).join(", "),
+          city: selectedSavedAddress.city,
+          pincode: selectedSavedAddress.pincode,
+        }
+      : address;
+
+  const handleUseLocation = async () => {
+    setLocateError("");
+    setLocating(true);
+    try {
+      const detected = await detectCurrentAddress();
+      setAddress((prev) => ({
+        ...prev,
+        line1: detected.line1 || prev.line1,
+        city: detected.city || prev.city,
+        state: detected.state || prev.state,
+        pincode: detected.pincode || prev.pincode,
+        lat: detected.lat,
+        lng: detected.lng,
+      }));
+    } catch (err) {
+      setLocateError(err.message || "Couldn't get your current location.");
+    } finally {
+      setLocating(false);
     }
-    return res;
   };
 
   const handlePay = async (e) => {
     e.preventDefault();
     setError("");
 
-    // Resolve the delivery address to send with the order: the saved
-    // address the customer picked, or the guest form below.
-    let address;
-    if (user) {
-      if (!selectedAddress) {
-        setError("Please choose a delivery address to continue.");
-        return;
-      }
-      address = {
-        name: selectedAddress.name,
-        email: user.email,
-        phone: selectedAddress.phone,
-        line1: [selectedAddress.line1, selectedAddress.line2].filter(Boolean).join(", "),
-        city: selectedAddress.city,
-        state: selectedAddress.state,
-        pincode: selectedAddress.pincode,
-      };
-    } else {
-      address = guestAddress;
+    if (!addingNew && !selectedSavedAddress) {
+      setError("Please choose a delivery address, or add a new one.");
+      return;
     }
 
     setPlacing(true);
 
     try {
+      // If checking out with a freshly typed address, offer to save it
+      // to the account so it's a one-tap pick next time.
+      if (addingNew && user?.email && saveNewAddress) {
+        await saveAddress({
+          label: "Home",
+          name: address.name,
+          phone: address.phone,
+          line1: address.line1,
+          city: address.city,
+          state: address.state,
+          pincode: address.pincode,
+          lat: address.lat,
+          lng: address.lng,
+        });
+      }
+
       // 1. Create a pending order record in the "Orders" sheet.
       const orderRes = await SheetsAPI.placeOrder({
         items,
-        customer: address,
-        amount: subtotal,
+        customer: activeAddress,
+        amount: total, // display hint only — Code.gs recomputes the real charge from Products + Campaigns, never trusts this
       });
 
       if (orderRes.demo) {
         // No backend wired up yet — simulate success so the UI flow is testable.
         clearCart();
-        navigate("/order-success", { state: { email: address.email } });
+        navigate("/order-success", { state: { email: activeAddress.email } });
         return;
       }
 
@@ -133,12 +155,12 @@ export default function Checkout() {
 
       const rzp = new window.Razorpay({
         key: razorpayKeyId,
-        amount: subtotal * 100,
+        amount: total * 100,
         currency: "INR",
         name: "neobonn",
         description: "Order payment",
         order_id: razorpayOrderId,
-        prefill: { name: address.name, email: address.email, contact: address.phone },
+        prefill: { name: activeAddress.name, email: activeAddress.email, contact: activeAddress.phone },
         theme: { color: "#33503f" },
         handler: async (response) => {
           // 2. Send Razorpay's response to our Apps Script backend,
@@ -152,7 +174,7 @@ export default function Checkout() {
           });
           if (verify.ok) {
             clearCart();
-            navigate("/order-success", { state: { orderId, email: address.email } });
+            navigate("/order-success", { state: { orderId, email: activeAddress.email } });
           } else {
             setError("Payment could not be verified. Please contact support.");
           }
@@ -180,102 +202,155 @@ export default function Checkout() {
       <SEO title="Checkout" path="/checkout" noindex />
       <h1 className="font-display text-3xl text-[var(--color-forest-dark)]">Checkout</h1>
 
-      <form onSubmit={handlePay} className="mt-8 space-y-6">
-        <div>
-          <h2 className="font-display text-lg text-[var(--color-forest-dark)]">Delivery Address</h2>
+      <h2 className="mt-8 font-display text-lg text-[var(--color-forest-dark)]">Deliver to</h2>
 
-          {user ? (
-            <div className="mt-4">
-              {addressesLoading && addresses.length === 0 ? (
-                <p className="text-sm text-[var(--color-charcoal)]/50">Loading your saved addresses...</p>
-              ) : (
-                <>
-                  {addresses.length > 0 && !showAddressForm && (
-                    <div className="space-y-3">
-                      {addresses.map((addr) => (
-                        <AddressCard
-                          key={addr.addressId}
-                          address={addr}
-                          selectable
-                          selected={selectedAddressId === addr.addressId}
-                          onSelect={() => setSelectedAddressId(addr.addressId)}
-                        />
-                      ))}
-                    </div>
-                  )}
+      {/* ---- Saved-address picker (signed-in customers with saved addresses) ---- */}
+      {user && addresses.length > 0 && !addingNew && (
+        <div className="mt-4 space-y-3">
+          {addresses.map((addr) => (
+            <AddressCard
+              key={addr.addressId}
+              address={addr}
+              selectable
+              selected={selectedAddressId === addr.addressId}
+              onSelect={() => setSelectedAddressId(addr.addressId)}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() => setAddingNew(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-dashed border-[var(--color-forest-dark)]/30 py-3 text-sm font-semibold text-[var(--color-forest-dark)]"
+          >
+            <Plus size={16} /> Deliver to a different address
+          </button>
+        </div>
+      )}
 
-                  {showAddressForm ? (
-                    <div className="mt-4 rounded-2xl border border-[var(--color-forest)]/10 bg-white p-5">
-                      <h3 className="font-display text-base text-[var(--color-forest-dark)]">
-                        Add a new address
-                      </h3>
-                      <div className="mt-4">
-                        <AddressForm
-                          onSave={handleSaveNewAddress}
-                          onCancel={addresses.length > 0 ? () => setShowAddressForm(false) : undefined}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddressForm(true)}
-                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-dashed border-[var(--color-forest-dark)]/30 py-3 text-sm font-semibold text-[var(--color-forest-dark)]"
-                    >
-                      <Plus size={16} /> Add new address
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <p className="text-sm text-[var(--color-charcoal)]/60">
-                <Link to="/login" className="font-semibold text-[var(--color-forest-dark)] underline">
-                  Sign in
-                </Link>{" "}
-                to checkout faster with a saved address, or fill in your details below.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <input required placeholder="Full name" value={guestAddress.name}
-                  onChange={(e) => setGuestAddress({ ...guestAddress, name: e.target.value })}
-                  className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-                <input required type="email" placeholder="Email" value={guestAddress.email}
-                  onChange={(e) => setGuestAddress({ ...guestAddress, email: e.target.value })}
-                  className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-              </div>
-              <input required placeholder="Phone number" value={guestAddress.phone}
-                onChange={(e) => setGuestAddress({ ...guestAddress, phone: e.target.value })}
-                className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-              <input required placeholder="Address" value={guestAddress.line1}
-                onChange={(e) => setGuestAddress({ ...guestAddress, line1: e.target.value })}
-                className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <input required placeholder="City" value={guestAddress.city}
-                  onChange={(e) => setGuestAddress({ ...guestAddress, city: e.target.value })}
-                  className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-                <input required placeholder="Pincode" value={guestAddress.pincode}
-                  onChange={(e) => setGuestAddress({ ...guestAddress, pincode: e.target.value })}
-                  className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
-              </div>
-            </div>
+      {/* ---- Manual address entry (guests, or "add a new address") ---- */}
+      {(addingNew || addresses.length === 0 || !user) && (
+        <form onSubmit={handlePay} className="mt-4 space-y-4">
+          {user && addresses.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAddingNew(false)}
+              className="text-xs font-semibold text-[var(--color-forest-dark)] underline"
+            >
+              ← Choose a saved address instead
+            </button>
           )}
+
+          <button
+            type="button"
+            onClick={handleUseLocation}
+            disabled={locating}
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-[var(--color-forest-dark)]/30 bg-[var(--color-forest-dark)]/5 py-3 text-sm font-semibold text-[var(--color-forest-dark)] disabled:opacity-60"
+          >
+            {locating ? <Loader2 size={16} className="animate-spin" /> : <LocateFixed size={16} />}
+            {locating ? "Finding your location..." : "Use my current location"}
+          </button>
+          {locateError && <p className="text-xs text-red-600">{locateError}</p>}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <input required placeholder="Full name" value={address.name}
+              onChange={(e) => setAddress({ ...address, name: e.target.value })}
+              className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+            <input required type="email" placeholder="Email" value={address.email}
+              onChange={(e) => setAddress({ ...address, email: e.target.value })}
+              className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+          </div>
+          <input required placeholder="Phone number" value={address.phone}
+            onChange={(e) => setAddress({ ...address, phone: e.target.value })}
+            className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+          <input required placeholder="Address" value={address.line1}
+            onChange={(e) => setAddress({ ...address, line1: e.target.value })}
+            className="w-full rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+          <div className="grid gap-4 sm:grid-cols-3">
+            <input required placeholder="City" value={address.city}
+              onChange={(e) => setAddress({ ...address, city: e.target.value })}
+              className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+            <input placeholder="State" value={address.state}
+              onChange={(e) => setAddress({ ...address, state: e.target.value })}
+              className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+            <input required placeholder="Pincode" value={address.pincode}
+              onChange={(e) => setAddress({ ...address, pincode: e.target.value })}
+              className="rounded-lg border border-[var(--color-forest)]/20 px-4 py-3 text-sm" />
+          </div>
+
+          {user && (
+            <label className="flex items-center gap-2 text-sm text-[var(--color-charcoal)]/70">
+              <input
+                type="checkbox"
+                checked={saveNewAddress}
+                onChange={(e) => setSaveNewAddress(e.target.checked)}
+                className="h-4 w-4 rounded border-[var(--color-forest)]/30"
+              />
+              Save this address to my account
+            </label>
+          )}
+
+          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+            {discountPercent > 0 && (
+              <>
+                <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
+                  <span>Bag total</span>
+                  <span className="line-through">₹{subtotal}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                  <span>Discount ({discountPercent}% off)</span>
+                  <span>− ₹{subtotal - total}</span>
+                </div>
+              </>
+            )}
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-display text-xl">Total</span>
+              <span className="font-display text-xl">₹{total}</span>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <button
+            disabled={placing}
+            className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {placing ? "Processing..." : `Pay ₹${total}`}
+          </button>
+        </form>
+      )}
+
+      {/* ---- Pay button when a saved address is selected (form above is hidden) ---- */}
+      {user && addresses.length > 0 && !addingNew && (
+        <div className="mt-6 space-y-4">
+          <div className="border-t border-[var(--color-forest)]/10 pt-4">
+            {discountPercent > 0 && (
+              <>
+                <div className="flex items-center justify-between text-sm text-[var(--color-charcoal)]/60">
+                  <span>Bag total</span>
+                  <span className="line-through">₹{subtotal}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-sm font-semibold text-[var(--color-forest)]">
+                  <span>Discount ({discountPercent}% off)</span>
+                  <span>− ₹{subtotal - total}</span>
+                </div>
+              </>
+            )}
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-display text-xl">Total</span>
+              <span className="font-display text-xl">₹{total}</span>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <button
+            onClick={handlePay}
+            disabled={placing}
+            className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {placing ? "Processing..." : `Pay ₹${total}`}
+          </button>
         </div>
-
-        <div className="flex items-center justify-between border-t border-[var(--color-forest)]/10 pt-4">
-          <span className="font-display text-xl">Total</span>
-          <span className="font-display text-xl">₹{subtotal}</span>
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <button
-          disabled={placing}
-          className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          {placing ? "Processing..." : `Pay ₹${subtotal}`}
-        </button>
-      </form>
+      )}
     </div>
   );
 }

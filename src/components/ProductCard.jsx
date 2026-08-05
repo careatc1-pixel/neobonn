@@ -1,8 +1,16 @@
 import { Link } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Heart } from "lucide-react";
+import { useWishlist } from "../context/WishlistContext";
+import { useCampaign } from "../context/CampaignContext";
+import { discountedPrice } from "../lib/pricing";
 
 export default function ProductCard({ product }) {
   const outOfStock = !product.comingSoon && Number(product.stock ?? 0) <= 0;
+  const { isWishlisted, toggleWishlist } = useWishlist();
+  const wishlisted = isWishlisted(product.id);
+  const { discountPercent } = useCampaign();
+  const finalPrice = discountedPrice(product.price, discountPercent);
+  const hasDiscount = discountPercent > 0 && !product.comingSoon && !outOfStock;
 
   return (
     <Link
@@ -15,13 +23,22 @@ export default function ProductCard({ product }) {
         <img
           src={product.image}
           alt={product.name}
-          loading="lazy"
-          decoding="async"
           onError={(e) => (e.currentTarget.style.opacity = 0)}
           className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
             outOfStock ? "grayscale" : ""
           }`}
         />
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleWishlist(product);
+          }}
+          aria-label={wishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow-sm transition-transform hover:scale-110"
+        >
+          <Heart size={15} className={wishlisted ? "fill-red-500 text-red-500" : "text-[var(--color-charcoal)]/50"} />
+        </button>
         {product.comingSoon && (
           <span className="absolute left-3 top-3 rounded-full bg-[var(--color-forest-dark)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">
             Coming Soon
@@ -45,12 +62,21 @@ export default function ProductCard({ product }) {
         )}
 
         <div className="mt-3 flex items-center justify-between">
-          <span className="font-semibold text-[var(--color-charcoal)]">
-            {product.comingSoon
-              ? "Notify Me"
-              : outOfStock
-                ? "Out of Stock"
-                : `₹${product.price}`}
+          <span className="flex items-baseline gap-1.5 font-semibold text-[var(--color-charcoal)]">
+            {product.comingSoon ? (
+              "Notify Me"
+            ) : outOfStock ? (
+              "Out of Stock"
+            ) : hasDiscount ? (
+              <>
+                <span>₹{finalPrice}</span>
+                <span className="text-xs font-normal text-[var(--color-charcoal)]/40 line-through">
+                  ₹{product.price}
+                </span>
+              </>
+            ) : (
+              `₹${product.price}`
+            )}
           </span>
           <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-gold)] opacity-0 transition-opacity group-hover:opacity-100">
             View →

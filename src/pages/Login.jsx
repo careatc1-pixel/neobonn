@@ -18,13 +18,21 @@ export default function Login() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    const res = await login(form.email, form.password);
-    if (res.ok) navigate("/");
-    else setError(res.message || "Invalid email or password.");
+    setSubmitting(true);
+    try {
+      const res = await login(form.email, form.password);
+      if (res.ok) navigate("/account");
+      else setError(res.message || "Invalid email or password.");
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSendOtp = async (e) => {
@@ -36,29 +44,45 @@ export default function Login() {
       return;
     }
     setSending(true);
-    const res = await requestOtp(form.email, "login");
-    setSending(false);
-    if (res.ok) {
-      setOtpSent(true);
-      setInfo(res.demo ? "Demo mode: use code 123456" : "A 6-digit code has been emailed to you.");
-    } else {
-      setError(res.message || "Could not send code. Please check the email and try again.");
+    try {
+      const res = await requestOtp(form.email, "login");
+      if (res.ok) {
+        setOtpSent(true);
+        setInfo(res.demo ? "Demo mode: use code 123456" : "A 6-digit code has been emailed to you.");
+      } else {
+        setError(res.message || "Could not send code. Please check the email and try again.");
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSending(false);
     }
   };
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     setError("");
-    const res = await loginWithOtp(form.email, otp);
-    if (res.ok) navigate("/");
-    else setError(res.message || "Invalid or expired code.");
+    setSubmitting(true);
+    try {
+      const res = await loginWithOtp(form.email, otp);
+      if (res.ok) navigate("/account");
+      else setError(res.message || "Invalid or expired code.");
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleGoogleCredential = async (response) => {
     setGoogleError("");
-    const res = await loginWithGoogle(response.credential);
-    if (res.ok) navigate("/");
-    else setGoogleError(res.message || "Google sign-in failed. Please try again.");
+    try {
+      const res = await loginWithGoogle(response.credential);
+      if (res.ok) navigate("/account");
+      else setGoogleError(res.message || "Google sign-in failed. Please try again.");
+    } catch (err) {
+      setGoogleError(err.message || "Something went wrong. Please try again.");
+    }
   };
 
   // Load the Google Identity Services button once the script (loaded in
@@ -152,8 +176,11 @@ export default function Login() {
               Forgot password?
             </Link>
           </div>
-          <button className="w-full rounded-full bg-[var(--color-forest-dark)] py-3 text-sm font-semibold text-white">
-            Login
+          <button
+            disabled={submitting}
+            className="w-full rounded-full bg-[var(--color-forest-dark)] py-3 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {submitting ? "Logging in..." : "Login"}
           </button>
         </form>
       ) : (

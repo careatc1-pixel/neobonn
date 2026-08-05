@@ -7,10 +7,6 @@ const SLIDES = [
     alt: "neobonn Anti-Acne Face Wash — with salicylic acid, alpha-arbutin, and willow bark",
   },
   {
-    image: "/marketing/showcase-2.jpg",
-    alt: "Unveiling neobonn — Your Complete Wellness Journey across face, body, and supplements",
-  },
-  {
     image: "/marketing/showcase-3.jpg",
     alt: "neobonn Peel-Off Collagen & Algine Face Mask with hydrolyzed collagen",
   },

@@ -177,7 +177,137 @@ if you ever change your business WhatsApp number, update it in both
 spots. This uses `wa.me` links (WhatsApp's own free deep-linking
 service) — no WhatsApp Business API subscription needed, and no cost.
 
-## 6. New: GST invoice auto-attached when an order is marked Delivered
+## 6. Redesigned: Account/Profile page (Zepto/Amazon-style layout)
+
+The `/account` page now matches the app-style profile layout you shared
+a screenshot of:
+
+- **Header**: avatar, name, phone number, Logout.
+- **3 quick-action cards**: "Your Orders", "Help & Support" (opens the
+  chat widget from anywhere on the page), "Your Wishlist".
+- **"Your Information" list**: Your Refunds, Your Wishlist, E-Gift
+  Cards, Help & Support — tapping a row jumps straight to that section
+  on the same page.
+- Everything below (Orders with live shipment tracking, Wishlist,
+  Returns/Refunds) is the same real, working data as before — just
+  reorganized to match the screenshot's structure.
+
+### What's genuinely new & working
+- **Wishlist** — tap the heart on any product card or product page to
+  save/unsave it. Fully working right now. It's stored the same way the
+  cart already is (per-account, on-device) — no new sheet/deployment
+  step needed. One trade-off worth knowing: like the cart, it doesn't
+  sync across different devices/browsers for the same account, since
+  there's no backend table for it. If you'd like it to sync across
+  devices too, that's a small follow-up (a `Wishlist` sheet + 2 backend
+  actions, same pattern as Returns) — just ask.
+
+### What's intentionally a placeholder, not faked
+- **"neobonn Gift Cards" / wallet balance** — shown in the screenshot as
+  a purple "Cash & Gift Card" banner with a real ₹ balance. Building
+  that for real means a proper credit ledger, redemption at checkout,
+  and an admin way to issue credit — i.e. it touches real money
+  handling. Rather than show a balance that doesn't actually work at
+  checkout (which would be actively misleading to customers), it's
+  marked **"Coming Soon"** for now. Happy to build the real version
+  whenever you're ready to scope it out.
+
+## 7. Glitch-fix pass (bug audit)
+
+A full read-through of the codebase (every `.jsx`/`.js` file, plus a
+TypeScript syntax check across all of them — zero syntax errors) turned
+up the following, now fixed:
+
+- **Broken image on the homepage.** `ProductShowcase.jsx` referenced
+  `/marketing/showcase-2.jpg`, which was never actually included in
+  `public/marketing/` (only 1, 3, 4, 5 exist). That slide rendered as a
+  broken image. Removed the dead entry.
+- **No 404 page.** There was no wildcard route, so any unknown URL
+  (typo, old bookmark, stray `/admin/*` path) rendered a blank page
+  under the navbar/footer instead of a friendly message. Wired the
+  existing `OopsScreen` component in as a real "Page not found" route.
+- **Help Desk chat was unreachable for most visitors.** `CHANGES.md`
+  (section 5, above) describes a floating "Need help?" bubble on every
+  storefront page, but the component itself never rendered one — it
+  only opened when triggered from the `/account` page. Since `/account`
+  requires being logged in, guests (and anyone not specifically on that
+  page) had no way to reach support at all. Added the floating launcher
+  button back to `HelpDesk.jsx`.
+- **Order total trusted the browser, not the server.** In
+  `google-apps-script/Code.gs`, `handlePlaceOrder` used to take the
+  `amount` field straight from the request body to both create the
+  Razorpay order and record the order's price — meaning a tampered
+  request (e.g. edited in devtools before it's sent) could get an order
+  created for less than the cart's real value. It now recomputes the
+  total server-side from the Products sheet's actual prices
+  (`computeAuthoritativeAmount`), the same way the stock check already
+  does, and ignores whatever amount the client sends.
+
+### ✅ Resolved: the "Flat 40% off" banners
+Both `SaleHeroBanner.jsx` and `PromoBanner.jsx` used to hardcode "Flat
+40% off every product" with no actual discount logic behind it —
+every visitor was shown a sale that didn't apply at checkout. This is
+now a real, working feature: see section 8 below (Admin -> Banners &
+Offers). There is currently no campaign marked Active by default, so
+until you create and activate one, both banners stay hidden and every
+price is the plain price — nothing is advertised that isn't real.
+
+### Also noted, not changed (lower priority / needs your input)
+- `src/pages/LoginChoice.jsx` exists but isn't imported or routed
+  anywhere — dead code, harmless but unused.
+- The Return/Exchange flow allows up to 4 photos (5MB each) + 1 video
+  (30MB) in a single submission — a maxed-out submission can approach
+  Google Apps Script's practical web app request-size ceiling. Rare in
+  practice, but worth knowing if customers ever report a return
+  submission failing to send.
+- Refund amounts for a *partial* return are calculated from the item
+  prices stored on the original order record, which come from the
+  cart payload at checkout time rather than the (now-fixed)
+  server-verified total. The overall order amount charged is correct
+  either way; only the per-item split used for partial refunds inherits
+  client-supplied prices. Worth hardening later by storing
+  server-verified per-item prices on the order itself.
+
+## 8. New: Admin -> Banners & Offers (live campaign management)
+
+You can now switch the homepage banner and sitewide discount to match
+whatever's happening right now — Diwali, a Monsoon Sale, a new launch,
+or nothing at all — entirely from the admin panel, no code changes or
+redeploy needed.
+
+**What's new:**
+- **New sheet tab required: `Campaigns`.** Add it to your Google Sheet
+  with header row: `Id | Name | Active | DiscountPercent | HeroImage |
+  HeroTitle | HeroSubtitle | StripText | CtaLink | CreatedAt |
+  UpdatedAt`. (Full details in the setup comment at the top of
+  `Code.gs`.) If you skip this, the site works exactly as before — no
+  banner, no discount, nothing breaks.
+- **Admin -> Banners & Offers tab**: create as many campaigns as you
+  want (e.g. "Diwali Dhamaka — 20% off", "Monsoon Sale — 40% off", "New
+  Launch — 0% off, announcement only"), each with its own top-strip
+  text, hero title/subtitle (or a fully custom hero image URL instead),
+  and a discount percentage. Only ONE campaign can be live at a time —
+  clicking "Make Live" on one automatically takes down whichever was
+  live before.
+- **Sitewide discount, applied everywhere prices are shown**: product
+  cards, the product page, the cart, and checkout all show the
+  discounted price with the original struck through. The order total
+  actually charged is independently recomputed on the server from the
+  live campaign's discount (same protection as the order-amount fix in
+  section 7 above) — a tampered checkout request can't apply a discount
+  that isn't really active, or skip one that is.
+- **Nothing live = nothing shown.** If no campaign is marked Active,
+  the hero banner and top strip are hidden automatically and every
+  price is the plain price — the site never advertises a sale that
+  isn't real (this also resolves the "Flat 40% off" banners that
+  weren't backed by an actual discount, flagged in section 7).
+- **Bonus fix while wiring this up**: the homepage's "Bestsellers"
+  section was importing the static product list directly instead of
+  the live catalog — so changes made in Admin -> Products (price,
+  stock, new products) never showed up on the homepage, only on the
+  `/products` page. It now reads from the same live source everywhere.
+
+## 9. New: GST invoice auto-attached when an order is marked Delivered
 
 When an admin moves an order to **Delivered** (Admin -> Orders), the
 customer's delivery email now automatically includes a GST tax invoice
@@ -190,6 +320,11 @@ customer's billing details, an item-by-item breakdown with HSN code,
 taxable value, and either CGST+SGST (if the delivery pincode starts
 with `110`, i.e. Delhi — same state as the seller) or IGST (any other
 state), plus the grand total.
+
+**Discount-aware:** if a campaign discount (section 8) was applied to
+the order, the invoice's line items are scaled proportionally so the
+invoice's grand total always exactly matches what the customer was
+actually charged — never the pre-discount sum of item prices.
 
 **Before going live, fill in your real business details** at the top
 of `google-apps-script/Code.gs` (search for "GST Invoice"):
