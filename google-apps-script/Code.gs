@@ -173,7 +173,7 @@
  * ------------------------------------------------------------------
  */
 
-const SHEET_ID = "PASTE_YOUR_GOOGLE_SHEET_ID_HERE";
+const SHEET_ID = "1egfhFDvwJhtDpzzE9_15OsSgwQJ8vVVMeI_C_HQdfVw";
 
 // Bump this whenever you redeploy — lets you confirm from the browser
 // that the LIVE deployment is actually running this file, by visiting
@@ -194,7 +194,7 @@ function getSheet(name) {
 // update this the moment you have a GSTIN.
 const SELLER_LEGAL_NAME = "Atharv Luxe Co.";
 const SELLER_ADDRESS = "Block B-2, House No. 239, Paschim Vihar, New Delhi - 110063";
-const SELLER_GSTIN = ""; // e.g. "07ABCDE1234F1Z5" — from your GST registration certificate
+const SELLER_GSTIN = "07BOHPT8023C1ZY"; // from your GST registration certificate
 const SELLER_STATE_NAME = "Delhi";
 const SELLER_PINCODE_PREFIX = "110"; // Delhi PINs start with 110 — used only to decide CGST+SGST (buyer in Delhi) vs IGST (buyer elsewhere). This is an approximation from PIN code, not a stored customer state — accurate for the vast majority of addresses, but if you ever see a Delhi order taxed as IGST (or vice versa) because of an edge-case PIN, this is why.
 const GST_RATE_PERCENT = 18; // change if your products fall under a different GST slab

@@ -34,7 +34,7 @@ export default function Cart() {
           const itemFinalPrice = discountedPrice(item.price, discountPercent);
           return (
             <div key={item.id} className="flex items-center gap-4 py-5">
-              <img src={item.image} onError={(e) => (e.currentTarget.style.opacity = 0)} alt={item.name} className="h-20 w-20 rounded-lg bg-[var(--color-cream-deep)] object-cover" />
+              <img src={item.image} loading="lazy" decoding="async" onError={(e) => (e.currentTarget.style.opacity = 0)} alt={item.name} className="h-20 w-20 rounded-lg bg-[var(--color-cream-deep)] object-cover" />
               <div className="flex-1">
                 <h3 className="font-medium">{item.name}</h3>
                 <p className="text-sm text-[var(--color-charcoal)]/60">

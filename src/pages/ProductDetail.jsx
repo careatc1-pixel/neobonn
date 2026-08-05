@@ -86,6 +86,8 @@ export default function ProductDetail() {
           <img
             src={product.image}
             alt={product.name}
+            loading="eager"
+            fetchpriority="high"
             onError={(e) => (e.currentTarget.style.opacity = 0)}
             className={`h-full w-full object-cover ${outOfStock ? "grayscale" : ""}`}
           />

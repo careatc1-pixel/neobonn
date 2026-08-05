@@ -36,7 +36,7 @@ function friendlyNetworkError(technicalMessage, action) {
 // so we fail fast with a clear, honest message instead.
 const REQUEST_TIMEOUT_MS = 45000;
 
-async function callSheetsApi(action, payload = {}) {
+async function callSheetsApi(action, payload = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   if (!API_URL) {
     console.warn(
       `[sheets] VITE_SHEETS_API_URL not set — "${action}" call skipped (demo mode).`
@@ -45,7 +45,7 @@ async function callSheetsApi(action, payload = {}) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let res;
   try {
@@ -62,7 +62,7 @@ async function callSheetsApi(action, payload = {}) {
       // on Google's side and actually succeeded. Say so honestly instead
       // of implying nothing happened.
       const trialId = reportError({
-        message: `Timed out after ${REQUEST_TIMEOUT_MS / 1000}s waiting for "${action}".`,
+        message: `Timed out after ${timeoutMs / 1000}s waiting for "${action}".`,
         context: `Sheets API: ${action}`,
       });
       const timeoutErr = new Error(
@@ -182,7 +182,7 @@ export const SheetsAPI = {
   bulkUpsertProducts: (products) => callSheetsApi("bulkUpsertProducts", { products }), // CSV import
 
   // ---- Campaigns (Admin -> Banners & Offers: live banner + sitewide discount) ----
-  getActiveCampaign: () => callSheetsApi("getActiveCampaign"), // public — powers hero banner, promo strip, and discounted prices everywhere
+  getActiveCampaign: () => callSheetsApi("getActiveCampaign", {}, 8000), // public — powers hero banner, promo strip, and discounted prices everywhere; short timeout since it's decorative, never worth making the page wait on
   listCampaigns: () => callSheetsApi("listCampaigns"), // admin: every campaign, most recently updated first
   upsertCampaign: (campaign) => callSheetsApi("upsertCampaign", campaign), // admin: {id?, name, active, discountPercent, heroImage?, heroTitle?, heroSubtitle?, stripText?, ctaLink?}
   deleteCampaign: (id) => callSheetsApi("deleteCampaign", { id }), // admin
