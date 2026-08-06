@@ -7,21 +7,10 @@ import { useAddresses } from "../context/AddressContext";
 import { useCampaign } from "../context/CampaignContext";
 import { discountedPrice } from "../lib/pricing";
 import { SheetsAPI } from "../lib/sheets";
+import { loadRazorpayScript } from "../lib/razorpay";
 import { detectCurrentAddress } from "../lib/geolocation";
 import SEO from "../components/SEO";
 import AddressCard from "../components/AddressCard";
-
-// Loads the Razorpay Checkout script once.
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
 
 function WalletRedeemToggle({ walletBalance, maxWalletUsable, useWallet, setUseWallet }) {
   if (walletBalance <= 0) return null;

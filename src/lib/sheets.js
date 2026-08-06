@@ -165,6 +165,8 @@ export const SheetsAPI = {
 
   // ---- neobonn Cash Wallet ----
   getWallet: (email) => callSheetsApi("getWallet", { email }), // {ok, balance, transactions} — customer's own wallet balance + ledger
+  createWalletTopup: (data) => callSheetsApi("createWalletTopup", data), // {email, amount} -> {ok, razorpayOrderId, razorpayKeyId, amount}
+  verifyWalletTopup: (data) => callSheetsApi("verifyWalletTopup", data), // {email, amount, razorpay_payment_id, razorpay_order_id, razorpay_signature}
 
   // ---- Help Desk / callback requests (chat widget) ----
   requestCallback: (data) => callSheetsApi("requestCallback", data), // {name?, phone, email?, orderId?, queryType, message?, preferredTime?}

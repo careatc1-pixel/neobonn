@@ -90,17 +90,19 @@
  *
  *    NOTE ON THE NEOBONN CASH WALLET: a simple running ledger, one row
  *    per movement, keyed by Email. "Type" is "Credit" (money added —
- *    e.g. a return refunded to wallet) or "Debit" (money spent — e.g.
+ *    e.g. a return refunded to wallet, or a customer's own self-serve
+ *    "Add Money" top-up via Razorpay) or "Debit" (money spent — e.g.
  *    used to pay for an order at checkout). "Balance" is the running
  *    balance for that Email immediately AFTER this row, so a
  *    customer's current balance is simply the Balance value on their
  *    most recent row (see walletBalanceFor). Customers see their
  *    balance + history in Account -> your neobonn Cash Wallet, and can
- *    apply available balance toward any order at Checkout. Every write
- *    to this sheet happens from inside a caller that already holds the
- *    script lock (handleReviewReturn / handlePlaceOrder /
- *    handleVerifyPayment) so a balance can never be double-spent by two
- *    concurrent requests.
+ *    apply available balance toward any order at Checkout, or add more
+ *    of their own money to it any time. Every write to this sheet
+ *    happens from inside a caller that already holds the script lock
+ *    (handleReviewReturn / handlePlaceOrder / handleVerifyPayment /
+ *    handleVerifyWalletTopup) so a balance can never be double-spent
+ *    (or double-credited) by two concurrent requests.
  *
  *    CallbackRequests | RequestId | Name | Email | Phone | OrderId
  *                 | QueryType | Message | PreferredTime | Status
@@ -564,6 +566,10 @@ function doPost(e) {
         return jsonResponse(handleRetryRefund(payload));
       case "getWallet":
         return jsonResponse(handleGetWallet(payload));
+      case "createWalletTopup":
+        return jsonResponse(handleCreateWalletTopup(payload));
+      case "verifyWalletTopup":
+        return jsonResponse(handleVerifyWalletTopup(payload));
       case "requestCallback":
         return jsonResponse(handleRequestCallback(payload));
       case "listCallbackRequests":
@@ -971,6 +977,105 @@ function handleGetWallet({ email }) {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const balance = transactions.length ? transactions[0].balance : 0;
   return { ok: true, balance, transactions };
+}
+
+// Customer adds their own money into the wallet ("Add Money"). Creates a
+// Razorpay order for the requested amount — no order/cart involved, this
+// is a standalone top-up. Mirrors handlePlaceOrder's Razorpay order
+// creation, minus the stock/cart bits.
+const WALLET_TOPUP_MIN = 1;
+const WALLET_TOPUP_MAX = 50000;
+
+function handleCreateWalletTopup({ email, amount }) {
+  if (!email) return { ok: false, message: "Missing email." };
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!(amt >= WALLET_TOPUP_MIN)) {
+    return { ok: false, message: `Enter at least ₹${WALLET_TOPUP_MIN}.` };
+  }
+  if (amt > WALLET_TOPUP_MAX) {
+    return { ok: false, message: `Max ₹${WALLET_TOPUP_MAX.toLocaleString("en-IN")} per top-up.` };
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const keyId = props.getProperty("RAZORPAY_KEY_ID");
+  const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+  if (!keyId || !keySecret) {
+    return {
+      ok: false,
+      message: "Razorpay is not configured yet. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Script Properties.",
+    };
+  }
+
+  const receipt = "WTOPUP" + new Date().getTime();
+  const rzpRes = UrlFetchApp.fetch("https://api.razorpay.com/v1/orders", {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Basic " + Utilities.base64Encode(keyId + ":" + keySecret),
+    },
+    payload: JSON.stringify({
+      amount: amt * 100,
+      currency: "INR",
+      receipt,
+    }),
+    muteHttpExceptions: true,
+  });
+  const rzpOrder = JSON.parse(rzpRes.getContentText());
+
+  if (!rzpOrder.id) {
+    const reason = (rzpOrder.error && rzpOrder.error.description) || "Unknown error";
+    return { ok: false, message: "Could not create payment order: " + reason };
+  }
+
+  return { ok: true, razorpayOrderId: rzpOrder.id, razorpayKeyId: keyId, amount: amt };
+}
+
+// Verifies the Razorpay signature for a wallet top-up and credits the
+// wallet — same HMAC check as handleVerifyPayment. Guarded by the script
+// lock, and idempotent on razorpay_order_id so a retried/duplicate
+// verification call (e.g. browser retry after a slow response) can never
+// credit the same top-up twice.
+function handleVerifyWalletTopup({ email, amount, razorpay_payment_id, razorpay_order_id, razorpay_signature }) {
+  if (!email) return { ok: false, message: "Missing email." };
+
+  const props = PropertiesService.getScriptProperties();
+  const keySecret = props.getProperty("RAZORPAY_KEY_SECRET");
+
+  const expectedSig = Utilities.computeHmacSha256Signature(
+    razorpay_order_id + "|" + razorpay_payment_id,
+    keySecret
+  )
+    .map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0"))
+    .join("");
+
+  if (expectedSig !== razorpay_signature) {
+    return { ok: false, message: "Signature mismatch." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const rows = getSheet("Wallet").getDataRange().getValues();
+    const alreadyCredited = rows
+      .slice(1)
+      .some((r) => r[5] === "Wallet Top-up" && String(r[6]) === String(razorpay_order_id));
+    if (alreadyCredited) {
+      return { ok: true, balance: walletBalanceFor(email), alreadyCredited: true };
+    }
+
+    const amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(amt > 0)) return { ok: false, message: "Invalid amount." };
+
+    return creditWallet(
+      email,
+      amt,
+      "Wallet Top-up",
+      razorpay_order_id,
+      `Added via Razorpay (${razorpay_payment_id})`
+    );
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handlePlaceOrder({ items, customer, walletAmount }) {

@@ -3,10 +3,11 @@ import { Navigate, useNavigate } from "react-router-dom";
 import {
   ChevronDown, ChevronRight, RotateCcw, MessageCircle,
   Heart, Gift, UserRound, ShoppingBag, MapPinned,
-  Wallet, ArrowDownLeft, ArrowUpRight,
+  Wallet, ArrowDownLeft, ArrowUpRight, Plus, X, Loader2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { SheetsAPI } from "../lib/sheets";
+import { loadRazorpayScript } from "../lib/razorpay";
 import { openHelpDesk } from "../lib/helpDeskBus";
 import SEO from "../components/SEO";
 
@@ -93,6 +94,136 @@ function InfoRow({ icon: Icon, label, badge, onClick }) {
   );
 }
 
+const TOPUP_PRESETS = [200, 500, 1000, 2000];
+
+// "Add Money" — lets the customer top up their own wallet via Razorpay.
+// Mirrors Checkout's create-order -> open Razorpay -> verify-payment flow,
+// just against the wallet top-up endpoints instead of an order.
+function AddMoneyModal({ user, onClose, onCredited }) {
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleAdd = async () => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      setError("Enter a valid amount.");
+      return;
+    }
+    if (amt > 50000) {
+      setError("Max ₹50,000 per top-up.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      const orderRes = await SheetsAPI.createWalletTopup({ email: user.email, amount: amt });
+      if (!orderRes.ok) {
+        setError(orderRes.message || "Could not start payment. Please try again.");
+        setBusy(false);
+        return;
+      }
+
+      const scriptOk = await loadRazorpayScript();
+      if (!scriptOk) throw new Error("Could not load payment gateway. Check your connection.");
+
+      const rzp = new window.Razorpay({
+        key: orderRes.razorpayKeyId,
+        amount: orderRes.amount * 100,
+        currency: "INR",
+        name: "neobonn",
+        description: "Wallet top-up",
+        order_id: orderRes.razorpayOrderId,
+        prefill: { name: user.name, email: user.email, contact: user.phone },
+        theme: { color: "#33503f" },
+        handler: async (response) => {
+          const verify = await SheetsAPI.verifyWalletTopup({
+            email: user.email,
+            amount: orderRes.amount,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_signature: response.razorpay_signature,
+          });
+          if (verify.ok) {
+            onCredited();
+            onClose();
+          } else {
+            setError("Payment could not be verified. Please contact support.");
+            setBusy(false);
+          }
+        },
+        modal: { ondismiss: () => setBusy(false) },
+      });
+
+      rzp.on("payment.failed", (response) => {
+        setError(response?.error?.description || "Payment failed. Please try again.");
+        setBusy(false);
+      });
+
+      rzp.open();
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-t-3xl bg-white p-6 sm:rounded-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-lg text-[var(--color-forest-dark)]">Add Money</h3>
+          <button onClick={onClose} aria-label="Close" className="text-[var(--color-charcoal)]/50">
+            <X size={20} />
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
+          Money added here can be used at checkout on any future order.
+        </p>
+
+        <div className="mt-5 flex items-center gap-2 rounded-xl border border-[var(--color-forest)]/15 px-4 py-3">
+          <span className="text-lg font-semibold text-[var(--color-charcoal)]/60">₹</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setError(""); }}
+            placeholder="Enter amount"
+            className="w-full bg-transparent text-lg font-semibold text-[var(--color-charcoal)] outline-none"
+            autoFocus
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {TOPUP_PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => { setAmount(String(p)); setError(""); }}
+              className="rounded-full border border-[var(--color-forest)]/15 px-4 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)] hover:bg-[var(--color-forest)]/5"
+            >
+              ₹{p}
+            </button>
+          ))}
+        </div>
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <button
+          onClick={handleAdd}
+          disabled={busy}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-forest-dark)] py-3 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+          {busy ? "Processing..." : "Proceed to pay"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Account() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -106,6 +237,7 @@ export default function Account() {
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [walletDemoMode, setWalletDemoMode] = useState(false);
   const [walletExpanded, setWalletExpanded] = useState(false);
+  const [showAddMoney, setShowAddMoney] = useState(false);
 
   const loadReturns = async () => {
     if (!user?.email) return;
@@ -214,12 +346,34 @@ export default function Account() {
             <span className="font-display text-lg text-[var(--color-forest-dark)]">
               ₹{walletLoaded ? walletBalance : "..."}
             </span>
+            {!walletDemoMode && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setShowAddMoney(true); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setShowAddMoney(true); } }}
+                aria-label="Add money to wallet"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-forest-dark)]/10 text-[var(--color-forest-dark)] hover:bg-[var(--color-forest-dark)]/20"
+              >
+                <Plus size={15} />
+              </span>
+            )}
             <ChevronDown size={16} className={`text-[var(--color-charcoal)]/40 transition-transform ${walletExpanded ? "rotate-180" : ""}`} />
           </div>
         </button>
 
         {walletExpanded && (
           <div className="border-t border-[var(--color-forest)]/10">
+            {!walletDemoMode && (
+              <div className="px-5 pt-4">
+                <button
+                  onClick={() => setShowAddMoney(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest-dark)]/25 py-2.5 text-sm font-semibold text-[var(--color-forest-dark)] hover:bg-[var(--color-forest-dark)]/5"
+                >
+                  <Plus size={16} /> Add Money
+                </button>
+              </div>
+            )}
             {walletDemoMode && (
               <p className="px-5 py-4 text-sm text-amber-800">
                 Demo mode: connect the Google Sheets backend to see your real wallet balance and history here.
@@ -302,6 +456,14 @@ export default function Account() {
           </div>
         )}
       </div>
+
+      {showAddMoney && (
+        <AddMoneyModal
+          user={user}
+          onClose={() => setShowAddMoney(false)}
+          onCredited={loadWallet}
+        />
+      )}
     </div>
   );
 }
