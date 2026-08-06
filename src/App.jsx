@@ -19,6 +19,9 @@ import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import Signup from "./pages/Signup";
 import Account from "./pages/Account";
+import AccountOrders from "./pages/account/Orders";
+import AccountAddresses from "./pages/account/Addresses";
+import AccountWishlist from "./pages/account/Wishlist";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
@@ -105,6 +108,9 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/account" element={<Account />} />
+            <Route path="/account/orders" element={<AccountOrders />} />
+            <Route path="/account/addresses" element={<AccountAddresses />} />
+            <Route path="/account/wishlist" element={<AccountWishlist />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/order-success" element={<OrderSuccess />} />
