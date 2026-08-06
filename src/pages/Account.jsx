@@ -124,6 +124,17 @@ function AddMoneyModal({ user, onClose, onCredited }) {
         return;
       }
 
+      // Backend said "ok" but didn't actually hand back a usable Razorpay
+      // order — happens if Razorpay keys aren't set in Script Properties,
+      // or the Apps Script backend hasn't been redeployed with the wallet
+      // top-up endpoints yet. Catch this here with a clear message instead
+      // of letting Razorpay's own checkout.js throw a raw "No key passed".
+      if (!orderRes.razorpayOrderId || !orderRes.razorpayKeyId) {
+        setError("Payment gateway is not configured yet. Please contact support.");
+        setBusy(false);
+        return;
+      }
+
       const scriptOk = await loadRazorpayScript();
       if (!scriptOk) throw new Error("Could not load payment gateway. Check your connection.");
 
