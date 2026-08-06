@@ -4,6 +4,7 @@ import SplashScreen from "./components/SplashScreen";
 import PromoBanner from "./components/PromoBanner";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import ScrollToTop from "./components/ScrollToTop";
 import AnalyticsRouteTracker from "./components/AnalyticsRouteTracker";
 import ErrorBoundary from "./components/ErrorBoundary";
 import HelpDesk from "./components/HelpDesk";
@@ -18,6 +19,9 @@ import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import Signup from "./pages/Signup";
 import Account from "./pages/Account";
+import AccountOrders from "./pages/account/Orders";
+import AccountAddresses from "./pages/account/Addresses";
+import AccountWishlist from "./pages/account/Wishlist";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
@@ -62,6 +66,7 @@ export default function App() {
   if (isAdminRoute) {
     return (
       <div className="flex min-h-screen flex-col">
+        <ScrollToTop />
         <ErrorBoundary key={location.pathname} context={`Admin page: ${location.pathname}`}>
           <Routes>
             <Route path={ADMIN_LOGIN_PATH} element={<AdminLogin />} />
@@ -82,6 +87,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <ScrollToTop />
       <AnalyticsRouteTracker />
       <PromoBanner />
       <Navbar />
@@ -102,6 +108,9 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/account" element={<Account />} />
+            <Route path="/account/orders" element={<AccountOrders />} />
+            <Route path="/account/addresses" element={<AccountAddresses />} />
+            <Route path="/account/wishlist" element={<AccountWishlist />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/order-success" element={<OrderSuccess />} />

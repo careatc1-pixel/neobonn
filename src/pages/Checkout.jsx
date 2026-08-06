@@ -1,27 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
-import { LocateFixed, Loader2, Plus, Wallet } from "lucide-react";
+import { LocateFixed, Loader2, Plus, Wallet, Banknote, CreditCard } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useAddresses } from "../context/AddressContext";
 import { useCampaign } from "../context/CampaignContext";
 import { discountedPrice } from "../lib/pricing";
 import { SheetsAPI } from "../lib/sheets";
+import { loadRazorpayScript } from "../lib/razorpay";
 import { detectCurrentAddress } from "../lib/geolocation";
 import SEO from "../components/SEO";
 import AddressCard from "../components/AddressCard";
-
-// Loads the Razorpay Checkout script once.
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
 
 function WalletRedeemToggle({ walletBalance, maxWalletUsable, useWallet, setUseWallet }) {
   if (walletBalance <= 0) return null;
@@ -41,6 +30,38 @@ function WalletRedeemToggle({ walletBalance, maxWalletUsable, useWallet, setUseW
         <span className="sr-only">₹{maxWalletUsable} will be applied</span>
       )}
     </label>
+  );
+}
+
+// Online (Razorpay) vs Cash on Delivery — same two buttons shown in
+// both checkout layouts below (saved-address flow and manual-entry
+// flow), so it's its own component rather than duplicated JSX.
+function PaymentMethodToggle({ paymentMethod, setPaymentMethod }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <button
+        type="button"
+        onClick={() => setPaymentMethod("online")}
+        className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+          paymentMethod === "online"
+            ? "border-[var(--color-forest-dark)] bg-[var(--color-forest-dark)]/10 text-[var(--color-forest-dark)]"
+            : "border-[var(--color-forest)]/20 text-[var(--color-charcoal)]/70"
+        }`}
+      >
+        <CreditCard size={16} /> Pay Online
+      </button>
+      <button
+        type="button"
+        onClick={() => setPaymentMethod("cod")}
+        className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+          paymentMethod === "cod"
+            ? "border-[var(--color-forest-dark)] bg-[var(--color-forest-dark)]/10 text-[var(--color-forest-dark)]"
+            : "border-[var(--color-forest)]/20 text-[var(--color-charcoal)]/70"
+        }`}
+      >
+        <Banknote size={16} /> Cash on Delivery
+      </button>
+    </div>
   );
 }
 
@@ -76,6 +97,7 @@ export default function Checkout() {
 
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("online"); // "online" | "cod"
 
   // ---- neobonn Cash Wallet redemption ----
   const [walletBalance, setWalletBalance] = useState(0);
@@ -164,6 +186,39 @@ export default function Checkout() {
           lat: address.lat,
           lng: address.lng,
         });
+      }
+
+      // ---- Cash on Delivery: skip Razorpay entirely, order is
+      // confirmed immediately and cash is collected at the doorstep. ----
+      if (paymentMethod === "cod") {
+        const codRes = await SheetsAPI.placeCodOrder({
+          items,
+          customer: activeAddress,
+          walletAmount, // display hint only — Code.gs clamps this to the customer's real wallet balance
+        });
+
+        if (codRes.demo) {
+          clearCart();
+          navigate("/order-success", { state: { email: activeAddress.email } });
+          return;
+        }
+
+        if (!codRes.ok) {
+          setError(codRes.message || "Could not place your order. Please try again.");
+          setPlacing(false);
+          return;
+        }
+
+        clearCart();
+        navigate("/order-success", {
+          state: {
+            orderId: codRes.orderId,
+            email: activeAddress.email,
+            cod: true,
+            codAmountDue: codRes.codAmountDue,
+          },
+        });
+        return;
       }
 
       // 1. Create a pending order record in the "Orders" sheet.
@@ -346,6 +401,7 @@ export default function Checkout() {
           )}
 
           <div className="border-t border-[var(--color-forest)]/10 pt-4 space-y-3">
+            <PaymentMethodToggle paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod} />
             {walletLoaded && (
               <WalletRedeemToggle
                 walletBalance={walletBalance}
@@ -384,7 +440,15 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : payableTotal > 0 ? `Pay ₹${payableTotal}` : "Place order (paid by wallet)"}
+            {placing
+              ? "Processing..."
+              : paymentMethod === "cod"
+              ? payableTotal > 0
+                ? `Place order — Pay ₹${payableTotal} on delivery`
+                : "Place order (paid by wallet)"
+              : payableTotal > 0
+              ? `Pay ₹${payableTotal}`
+              : "Place order (paid by wallet)"}
           </button>
         </form>
       )}
@@ -393,6 +457,7 @@ export default function Checkout() {
       {user && addresses.length > 0 && !addingNew && (
         <div className="mt-6 space-y-4">
           <div className="border-t border-[var(--color-forest)]/10 pt-4 space-y-3">
+            <PaymentMethodToggle paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod} />
             {walletLoaded && (
               <WalletRedeemToggle
                 walletBalance={walletBalance}
@@ -432,7 +497,15 @@ export default function Checkout() {
             disabled={placing}
             className="w-full rounded-full bg-[var(--color-forest-dark)] py-3.5 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {placing ? "Processing..." : payableTotal > 0 ? `Pay ₹${payableTotal}` : "Place order (paid by wallet)"}
+            {placing
+              ? "Processing..."
+              : paymentMethod === "cod"
+              ? payableTotal > 0
+                ? `Place order — Pay ₹${payableTotal} on delivery`
+                : "Place order (paid by wallet)"
+              : payableTotal > 0
+              ? `Pay ₹${payableTotal}`
+              : "Place order (paid by wallet)"}
           </button>
         </div>
       )}

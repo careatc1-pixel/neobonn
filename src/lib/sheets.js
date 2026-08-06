@@ -128,6 +128,7 @@ export const SheetsAPI = {
 
   // ---- Orders sheet ----
   placeOrder: (data) => callSheetsApi("placeOrder", data), // {items, customer, amount, walletAmount?, ...}
+  placeCodOrder: (data) => callSheetsApi("placeCodOrder", data), // {items, customer, walletAmount?} -> Cash on Delivery, no Razorpay round-trip; returns {ok, orderId, codAmountDue, walletUsed, amount}
   verifyPayment: (data) => callSheetsApi("verifyPayment", data), // {orderId, razorpay_payment_id, razorpay_signature}
   getMyOrders: (email) => callSheetsApi("getMyOrders", { email }), // customer order history
 
@@ -165,6 +166,8 @@ export const SheetsAPI = {
 
   // ---- neobonn Cash Wallet ----
   getWallet: (email) => callSheetsApi("getWallet", { email }), // {ok, balance, transactions} — customer's own wallet balance + ledger
+  createWalletTopup: (data) => callSheetsApi("createWalletTopup", data), // {email, amount} -> {ok, razorpayOrderId, razorpayKeyId, amount}
+  verifyWalletTopup: (data) => callSheetsApi("verifyWalletTopup", data), // {email, amount, razorpay_payment_id, razorpay_order_id, razorpay_signature}
 
   // ---- Help Desk / callback requests (chat widget) ----
   requestCallback: (data) => callSheetsApi("requestCallback", data), // {name?, phone, email?, orderId?, queryType, message?, preferredTime?}

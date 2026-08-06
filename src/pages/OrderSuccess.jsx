@@ -3,7 +3,7 @@ import SEO from "../components/SEO";
 
 export default function OrderSuccess() {
   const { state } = useLocation();
-  const { orderId, email } = state || {};
+  const { orderId, email, cod, codAmountDue } = state || {};
 
   return (
     <div className="mx-auto max-w-lg px-5 py-24 text-center">
@@ -20,6 +20,11 @@ export default function OrderSuccess() {
       </p>
       {orderId && (
         <p className="mt-2 font-mono text-xs text-[var(--color-charcoal)]/50">{orderId}</p>
+      )}
+      {cod && codAmountDue > 0 && (
+        <p className="mt-4 rounded-xl bg-[var(--color-forest-dark)]/5 px-4 py-3 text-sm font-medium text-[var(--color-forest-dark)]">
+          Please keep ₹{codAmountDue} ready in cash for our delivery agent.
+        </p>
       )}
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Link to="/products" className="inline-block rounded-full bg-[var(--color-forest-dark)] px-8 py-3 text-sm font-semibold text-white">

@@ -1,30 +1,15 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
-  Package, ChevronDown, ChevronRight, RotateCcw, MessageCircle,
-  Heart, Gift, UserRound, ShoppingBag, MapPinned, Star,
-  Wallet, ArrowDownLeft, ArrowUpRight,
+  ChevronDown, ChevronRight, RotateCcw, MessageCircle,
+  Heart, Gift, UserRound, ShoppingBag, MapPinned,
+  Wallet, ArrowDownLeft, ArrowUpRight, Plus, X, Loader2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { useCart } from "../context/CartContext";
-import { useWishlist } from "../context/WishlistContext";
 import { SheetsAPI } from "../lib/sheets";
+import { loadRazorpayScript } from "../lib/razorpay";
 import { openHelpDesk } from "../lib/helpDeskBus";
-import { COMPANY } from "../data/company";
 import SEO from "../components/SEO";
-import OrderTimeline from "../components/OrderTimeline";
-import ReturnRequestModal from "../components/ReturnRequestModal";
-import AddressBook from "../components/AddressBook";
-
-const RETURN_WINDOW_DAYS = 7;
-
-function isReturnEligible(order) {
-  if (order.trackingStatus !== "Delivered") return false;
-  const deliveredAt = order.stageTimestamps?.Delivered;
-  if (!deliveredAt) return false;
-  const daysSince = (Date.now() - new Date(deliveredAt).getTime()) / (1000 * 60 * 60 * 24);
-  return daysSince <= RETURN_WINDOW_DAYS;
-}
 
 function ReturnStatusBadge({ status }) {
   const styles = {
@@ -39,40 +24,10 @@ function ReturnStatusBadge({ status }) {
   );
 }
 
-function StatusBadge({ status }) {
-  const isPaid = (status || "").toLowerCase() === "paid";
-  return (
-    <span
-      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-        isPaid ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-      }`}
-    >
-      {status || "Pending"}
-    </span>
-  );
-}
-
-function TrackingBadge({ trackingStatus }) {
-  const isDelivered = trackingStatus === "Delivered";
-  const isCancelled = trackingStatus === "Cancelled";
-  return (
-    <span
-      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-        isCancelled
-          ? "bg-red-100 text-red-700"
-          : isDelivered
-          ? "bg-green-100 text-green-700"
-          : "bg-blue-100 text-blue-700"
-      }`}
-    >
-      {trackingStatus || "Order Placed"}
-    </span>
-  );
-}
-
-// Scrolls to a section on this same page (used by the quick-action cards
-// and the "Your Information" list, like tapping a row on a native app's
-// Profile screen).
+// Scrolls to a section still on this same page (used for Refunds and the
+// Wallet card, which stay inline). Orders / Addresses / Wishlist now live
+// on their own routes — see the "Your Information" list and quick-action
+// cards below, which use navigate() instead.
 function scrollToSection(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -139,28 +94,161 @@ function InfoRow({ icon: Icon, label, badge, onClick }) {
   );
 }
 
+const TOPUP_PRESETS = [200, 500, 1000, 2000];
+
+// "Add Money" — lets the customer top up their own wallet via Razorpay.
+// Mirrors Checkout's create-order -> open Razorpay -> verify-payment flow,
+// just against the wallet top-up endpoints instead of an order.
+function AddMoneyModal({ user, onClose, onCredited }) {
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleAdd = async () => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      setError("Enter a valid amount.");
+      return;
+    }
+    if (amt > 50000) {
+      setError("Max ₹50,000 per top-up.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      const orderRes = await SheetsAPI.createWalletTopup({ email: user.email, amount: amt });
+      if (!orderRes.ok) {
+        setError(orderRes.message || "Could not start payment. Please try again.");
+        setBusy(false);
+        return;
+      }
+
+      // Backend said "ok" but didn't actually hand back a usable Razorpay
+      // order — happens if Razorpay keys aren't set in Script Properties,
+      // or the Apps Script backend hasn't been redeployed with the wallet
+      // top-up endpoints yet. Catch this here with a clear message instead
+      // of letting Razorpay's own checkout.js throw a raw "No key passed".
+      if (!orderRes.razorpayOrderId || !orderRes.razorpayKeyId) {
+        setError("Payment gateway is not configured yet. Please contact support.");
+        setBusy(false);
+        return;
+      }
+
+      const scriptOk = await loadRazorpayScript();
+      if (!scriptOk) throw new Error("Could not load payment gateway. Check your connection.");
+
+      const rzp = new window.Razorpay({
+        key: orderRes.razorpayKeyId,
+        amount: orderRes.amount * 100,
+        currency: "INR",
+        name: "neobonn",
+        description: "Wallet top-up",
+        order_id: orderRes.razorpayOrderId,
+        prefill: { name: user.name, email: user.email, contact: user.phone },
+        theme: { color: "#33503f" },
+        handler: async (response) => {
+          const verify = await SheetsAPI.verifyWalletTopup({
+            email: user.email,
+            amount: orderRes.amount,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_signature: response.razorpay_signature,
+          });
+          if (verify.ok) {
+            onCredited();
+            onClose();
+          } else {
+            setError("Payment could not be verified. Please contact support.");
+            setBusy(false);
+          }
+        },
+        modal: { ondismiss: () => setBusy(false) },
+      });
+
+      rzp.on("payment.failed", (response) => {
+        setError(response?.error?.description || "Payment failed. Please try again.");
+        setBusy(false);
+      });
+
+      rzp.open();
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-t-3xl bg-white p-6 sm:rounded-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-lg text-[var(--color-forest-dark)]">Add Money</h3>
+          <button onClick={onClose} aria-label="Close" className="text-[var(--color-charcoal)]/50">
+            <X size={20} />
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
+          Money added here can be used at checkout on any future order.
+        </p>
+
+        <div className="mt-5 flex items-center gap-2 rounded-xl border border-[var(--color-forest)]/15 px-4 py-3">
+          <span className="text-lg font-semibold text-[var(--color-charcoal)]/60">₹</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setError(""); }}
+            placeholder="Enter amount"
+            className="w-full bg-transparent text-lg font-semibold text-[var(--color-charcoal)] outline-none"
+            autoFocus
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {TOPUP_PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => { setAmount(String(p)); setError(""); }}
+              className="rounded-full border border-[var(--color-forest)]/15 px-4 py-1.5 text-xs font-semibold text-[var(--color-forest-dark)] hover:bg-[var(--color-forest)]/5"
+            >
+              ₹{p}
+            </button>
+          ))}
+        </div>
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <button
+          onClick={handleAdd}
+          disabled={busy}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-forest-dark)] py-3 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+          {busy ? "Processing..." : "Proceed to pay"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Account() {
   const { user, logout } = useAuth();
-  const { addItem } = useCart();
-  const { items: wishlistItems, removeItem: removeWishlistItem } = useWishlist();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [demoMode, setDemoMode] = useState(false);
-  const [loadErr, setLoadErr] = useState("");
-  const [expandedId, setExpandedId] = useState(null);
 
   const [returns, setReturns] = useState([]);
   const [returnsLoaded, setReturnsLoaded] = useState(false);
   const [returnsDemoMode, setReturnsDemoMode] = useState(false);
-  const [returnModalOrder, setReturnModalOrder] = useState(null);
-  const [movedToBag, setMovedToBag] = useState(null);
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletTxns, setWalletTxns] = useState([]);
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [walletDemoMode, setWalletDemoMode] = useState(false);
   const [walletExpanded, setWalletExpanded] = useState(false);
+  const [showAddMoney, setShowAddMoney] = useState(false);
 
   const loadReturns = async () => {
     if (!user?.email) return;
@@ -197,35 +285,11 @@ export default function Account() {
 
   useEffect(() => {
     if (!user?.email) return;
-    (async () => {
-      setLoading(true);
-      setLoadErr("");
-      try {
-        const res = await SheetsAPI.getMyOrders(user.email);
-        if (res.demo) {
-          setDemoMode(true);
-        } else if (res.ok) {
-          setOrders(res.orders);
-        } else {
-          setLoadErr(res.message || "Couldn't load your orders.");
-        }
-      } catch (err) {
-        setLoadErr(err.message || "Couldn't load your orders.");
-      } finally {
-        setLoading(false);
-      }
-    })();
     loadReturns();
     loadWallet();
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!user) return <Navigate to="/login" replace />;
-
-  const handleMoveToBag = (item) => {
-    addItem({ id: item.id, name: item.name, price: item.price, image: item.image, stock: Infinity }, 1);
-    setMovedToBag(item.id);
-    setTimeout(() => setMovedToBag(null), 1500);
-  };
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-10 md:px-8">
@@ -237,7 +301,7 @@ export default function Account() {
           <UserRound size={30} className="text-[var(--color-forest-dark)]" />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-display text-2xl text-[var(--color-forest-dark)]">{user.name}</h1>
+          <h1 className="truncate font-display text-lg text-[var(--color-forest-dark)]">{user.name}</h1>
           <p className="mt-0.5 text-sm text-[var(--color-charcoal)]/60">{user.phone || user.email}</p>
         </div>
         <button
@@ -248,12 +312,12 @@ export default function Account() {
         </button>
       </div>
 
-      {/* ---- Quick action cards ---- */}
+      {/* ---- Quick action cards — each is a real page navigation ---- */}
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <QuickActionCard icon={ShoppingBag} label="Your Orders" onClick={() => scrollToSection("orders")} />
-        <QuickActionCard icon={MapPinned} label="Addresses" onClick={() => scrollToSection("addresses")} />
+        <QuickActionCard icon={ShoppingBag} label="Your Orders" onClick={() => navigate("/account/orders")} />
+        <QuickActionCard icon={MapPinned} label="Addresses" onClick={() => navigate("/account/addresses")} />
         <QuickActionCard icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
-        <QuickActionCard icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
+        <QuickActionCard icon={Heart} label="Your Wishlist" onClick={() => navigate("/account/wishlist")} />
       </div>
 
       {/* ---- Gift cards banner (not wired to real money yet — see CHANGES.md) ---- */}
@@ -293,12 +357,34 @@ export default function Account() {
             <span className="font-display text-lg text-[var(--color-forest-dark)]">
               ₹{walletLoaded ? walletBalance : "..."}
             </span>
+            {!walletDemoMode && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setShowAddMoney(true); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setShowAddMoney(true); } }}
+                aria-label="Add money to wallet"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-forest-dark)]/10 text-[var(--color-forest-dark)] hover:bg-[var(--color-forest-dark)]/20"
+              >
+                <Plus size={15} />
+              </span>
+            )}
             <ChevronDown size={16} className={`text-[var(--color-charcoal)]/40 transition-transform ${walletExpanded ? "rotate-180" : ""}`} />
           </div>
         </button>
 
         {walletExpanded && (
           <div className="border-t border-[var(--color-forest)]/10">
+            {!walletDemoMode && (
+              <div className="px-5 pt-4">
+                <button
+                  onClick={() => setShowAddMoney(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest-dark)]/25 py-2.5 text-sm font-semibold text-[var(--color-forest-dark)] hover:bg-[var(--color-forest-dark)]/5"
+                >
+                  <Plus size={16} /> Add Money
+                </button>
+              </div>
+            )}
             {walletDemoMode && (
               <p className="px-5 py-4 text-sm text-amber-800">
                 Demo mode: connect the Google Sheets backend to see your real wallet balance and history here.
@@ -327,181 +413,11 @@ export default function Account() {
         <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
           <InfoRow icon={RotateCcw} label="Your Refunds" onClick={() => scrollToSection("refunds")} />
           <InfoRow icon={Wallet} label="neobonn Cash Wallet" onClick={() => { setWalletExpanded(true); scrollToSection("wallet"); }} />
-          <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => scrollToSection("addresses")} />
-          <InfoRow icon={Heart} label="Your Wishlist" onClick={() => scrollToSection("wishlist")} />
+          <InfoRow icon={MapPinned} label="Saved Addresses" onClick={() => navigate("/account/addresses")} />
+          <InfoRow icon={Heart} label="Your Wishlist" onClick={() => navigate("/account/wishlist")} />
           <InfoRow icon={Gift} label="E-Gift Cards" badge="Soon" />
           <InfoRow icon={MessageCircle} label="Help & Support" onClick={openHelpDesk} />
         </div>
-      </div>
-
-      {/* ---- Orders ---- */}
-      <div id="orders" className="mt-12 scroll-mt-6">
-        <h2 className="font-display text-xl text-[var(--color-forest-dark)]">Your Orders</h2>
-
-        {demoMode && (
-          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Demo mode: connect the Google Sheets backend (see README.md) to
-            see real order history here.
-          </div>
-        )}
-
-        {!demoMode && loading && (
-          <p className="mt-4 text-sm text-[var(--color-charcoal)]/50">Loading your orders...</p>
-        )}
-
-        {!demoMode && loadErr && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {loadErr}
-          </div>
-        )}
-
-        {!demoMode && !loading && !loadErr && orders.length === 0 && (
-          <div className="mt-6 flex flex-col items-center rounded-2xl border border-dashed border-[var(--color-forest)]/20 py-12 text-center">
-            <Package className="text-[var(--color-forest)]/40" size={32} />
-            <p className="mt-3 text-sm text-[var(--color-charcoal)]/60">
-              You haven't placed any orders yet.
-            </p>
-          </div>
-        )}
-
-        <div className="mt-6 space-y-4">
-          {orders.map((order) => {
-            const isOpen = expandedId === order.orderId;
-            return (
-              <div key={order.orderId} className="rounded-2xl border border-[var(--color-forest)]/10 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-mono text-xs text-[var(--color-charcoal)]/50">{order.orderId}</p>
-                    <p className="text-sm text-[var(--color-charcoal)]/60">
-                      {order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={order.status} />
-                    <TrackingBadge trackingStatus={order.trackingStatus} />
-                  </div>
-                </div>
-
-                <ul className="mt-4 space-y-1 text-sm text-[var(--color-charcoal)]/70">
-                  {(order.items || []).map((item, i) => (
-                    <li key={i} className="flex justify-between">
-                      <span>{item.name} × {item.qty}</span>
-                      {item.price && <span>₹{item.price * item.qty}</span>}
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="mt-4 flex items-center justify-between border-t border-[var(--color-forest)]/10 pt-3">
-                  <span className="text-sm font-medium text-[var(--color-charcoal)]/60">Total</span>
-                  <span className="font-display text-lg text-[var(--color-forest-dark)]">₹{order.amount}</span>
-                </div>
-
-                <button
-                  onClick={() => setExpandedId(isOpen ? null : order.orderId)}
-                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest)]/15 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
-                >
-                  {isOpen ? "Hide tracking" : "Track shipment"}
-                  <ChevronDown size={14} className={isOpen ? "rotate-180 transition-transform" : "transition-transform"} />
-                </button>
-
-                {isReturnEligible(order) && (
-                  <button
-                    onClick={() => setReturnModalOrder(order)}
-                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest)]/15 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
-                  >
-                    <RotateCcw size={14} /> Return / Exchange
-                  </button>
-                )}
-
-                {order.trackingStatus === "Delivered" && (
-                  <a
-                    href={COMPANY.googleReviewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
-                  >
-                    <Star size={14} /> Loved it? Rate us on Google
-                  </a>
-                )}
-
-                <button
-                  onClick={() => {
-                    openHelpDesk();
-                  }}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-forest)]/15 py-2 text-xs font-semibold text-[var(--color-forest-dark)]"
-                >
-                  <MessageCircle size={14} /> Need help with this order?
-                </button>
-
-                {isOpen && (
-                  <div className="mt-4 border-t border-[var(--color-forest)]/10 pt-4">
-                    <OrderTimeline
-                      trackingStatus={order.trackingStatus}
-                      trackingHistory={order.trackingHistory}
-                      stageTimestamps={order.stageTimestamps}
-                      carrier={order.carrier}
-                      trackingNumber={order.trackingNumber}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ---- Saved Addresses ---- */}
-      <div id="addresses" className="mt-12 scroll-mt-6">
-        <h2 className="font-display text-xl text-[var(--color-forest-dark)]">Saved Addresses</h2>
-        <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
-          Save multiple delivery addresses and pick one at checkout — or tap "Use my current
-          location" to fill one in automatically.
-        </p>
-        <AddressBook />
-      </div>
-
-      {/* ---- Wishlist ---- */}
-      <div id="wishlist" className="mt-12 scroll-mt-6">
-        <h2 className="font-display text-xl text-[var(--color-forest-dark)]">Your Wishlist</h2>
-        <p className="mt-1 text-xs text-[var(--color-charcoal)]/50">
-          Saved on this device — tap the heart on any product to add or remove it.
-        </p>
-
-        {wishlistItems.length === 0 ? (
-          <div className="mt-6 flex flex-col items-center rounded-2xl border border-dashed border-[var(--color-forest)]/20 py-12 text-center">
-            <Heart className="text-[var(--color-forest)]/40" size={32} />
-            <p className="mt-3 text-sm text-[var(--color-charcoal)]/60">Nothing saved yet.</p>
-          </div>
-        ) : (
-          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-            {wishlistItems.map((item) => (
-              <div key={item.id} className="overflow-hidden rounded-2xl border border-[var(--color-forest)]/10 bg-white">
-                <div className="aspect-square overflow-hidden bg-[var(--color-cream-deep)]">
-                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
-                </div>
-                <div className="p-3">
-                  <p className="truncate text-sm font-medium text-[var(--color-charcoal)]">{item.name}</p>
-                  <p className="text-sm text-[var(--color-forest-dark)]">₹{item.price}</p>
-                  <div className="mt-2 flex gap-1.5">
-                    <button
-                      onClick={() => handleMoveToBag(item)}
-                      className="flex-1 rounded-full bg-[var(--color-forest-dark)] py-1.5 text-[11px] font-semibold text-white"
-                    >
-                      {movedToBag === item.id ? "Added ✓" : "Add to Bag"}
-                    </button>
-                    <button
-                      onClick={() => removeWishlistItem(item.id)}
-                      aria-label="Remove from wishlist"
-                      className="rounded-full border border-[var(--color-forest)]/15 px-2.5 text-xs"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ---- Returns & Refunds ---- */}
@@ -552,12 +468,11 @@ export default function Account() {
         )}
       </div>
 
-      {returnModalOrder && (
-        <ReturnRequestModal
-          order={returnModalOrder}
+      {showAddMoney && (
+        <AddMoneyModal
           user={user}
-          onClose={() => setReturnModalOrder(null)}
-          onSubmitted={loadReturns}
+          onClose={() => setShowAddMoney(false)}
+          onCredited={loadWallet}
         />
       )}
     </div>
